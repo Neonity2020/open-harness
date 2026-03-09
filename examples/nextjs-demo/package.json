@@ -13,6 +13,7 @@
     "@openharness/core": "workspace:*",
     "@openharness/react": "workspace:*",
     "ai": "^6.0.97",
+    "zod": "^4.3.6",
     "next": "^15.3.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

@@ -16,11 +16,38 @@ OpenHarness is a pnpm monorepo with two packages and an example app:
 | [`@openharness/react`](packages/react) | React hooks and provider for AI SDK 5 chat UIs |
 | [`examples/nextjs-demo`](examples/nextjs-demo) | Next.js demo app using both packages |
 
+## Getting Started
+
 ```bash
 pnpm install
 pnpm build
-pnpm test
 ```
+
+Both examples require an `OPENAI_API_KEY`. Create a `.env` file in the repo root:
+
+```bash
+echo "OPENAI_API_KEY=sk-..." > .env
+```
+
+### Run the CLI example
+
+An interactive terminal agent with tool approval prompts, subagent display, and compaction.
+
+```bash
+pnpm --filter cli-demo start
+```
+
+### Run the Next.js example
+
+A chat app with streaming, tool visualization, subagent status, and an `announce` tool for agent narration.
+
+```bash
+cp examples/nextjs-demo/.env.example examples/nextjs-demo/.env
+# Edit .env and add your OPENAI_API_KEY
+pnpm --filter nextjs-demo dev
+```
+
+Then open http://localhost:3000.
 
 ## Agents
 
@@ -565,21 +592,11 @@ import {
 } from "@openharness/core";
 ```
 
-## Example CLI
+## Examples
 
-[`packages/core/example/cli.ts`](packages/core/example/cli.ts) is a fully working agent CLI that ties everything together — a `Session` wrapping an `Agent` with tool approval prompts, ora spinners, streamed output, live subagent display, and a `/compact` command for manual compaction. It's a good reference for how to wire up all the primitives into an interactive application.
+| Example | Description | Run |
+| --- | --- | --- |
+| [`examples/cli`](examples/cli) | Interactive terminal agent with tool approval, subagent display, and compaction | `pnpm --filter cli-demo start` |
+| [`examples/nextjs-demo`](examples/nextjs-demo) | Next.js chat app with streaming, `useOpenHarness`, subagent/session status, and `announce` tool | `pnpm --filter nextjs-demo dev` |
 
-```bash
-# requires a .env file with OPENAI_API_KEY
-pnpm --filter @openharness/core cli
-```
-
-## Example Next.js App
-
-[`examples/nextjs-demo`](examples/nextjs-demo) is a Next.js chat app that demonstrates the full stack: server-side route handler with `session.toResponse()`, client-side hooks with `useOpenHarness`, live subagent and session status, and an `announce` tool that lets the agent narrate its progress as styled messages in the chat.
-
-```bash
-cp examples/nextjs-demo/.env.example examples/nextjs-demo/.env
-# Edit .env and add your OPENAI_API_KEY
-pnpm --filter nextjs-demo dev
-```
+See [Getting Started](#getting-started) for setup instructions.

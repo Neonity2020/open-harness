@@ -2,10 +2,15 @@ import * as readline from "node:readline";
 import { openai } from "@ai-sdk/openai";
 import chalk from "chalk";
 import ora from "ora";
-import { Agent, type AgentEvent, type ToolCallInfo } from "../src/agent.js";
-import { Session, type SessionEvent } from "../src/session.js";
-import { fsTools, readFile, listFiles, grep } from "../src/tools/fs.js";
-import { bash } from "../src/tools/bash.js";
+import {
+  Agent,
+  Session,
+  type AgentEvent,
+  type ToolCallInfo,
+  type SessionEvent,
+} from "@openharness/core";
+import { fsTools, readFile, listFiles, grep } from "@openharness/core/tools/fs";
+import { bash } from "@openharness/core/tools/bash";
 
 // ── Readline setup ───────────────────────────────────────────────────
 
