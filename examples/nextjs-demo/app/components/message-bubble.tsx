@@ -5,6 +5,14 @@ import type { OHUIMessage } from "@openharness/core";
 export function MessageBubble({ message }: { message: OHUIMessage }) {
   const isUser = message.role === "user";
 
+  function pretty(value: unknown) {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
   return (
     <div
       style={{
@@ -53,17 +61,26 @@ export function MessageBubble({ message }: { message: OHUIMessage }) {
                 part.type.startsWith("tool-") ||
                 part.type === "dynamic-tool"
               ) {
-                const toolPart = part as {
-                  type: string;
-                  toolCallId: string;
-                  state: string;
-                };
+                const toolPart = part as any;
                 const toolName =
                   part.type === "dynamic-tool"
                     ? (part as any).toolName ?? "tool"
                     : part.type.replace("tool-", "");
+
+                const state = toolPart.state as string | undefined;
+                const input = toolPart.input;
+                const output = toolPart.output;
+                const errorText = toolPart.errorText;
+
+                const summaryRight =
+                  state === "output"
+                    ? "done"
+                    : state === "output-error"
+                      ? "error"
+                      : "running...";
+
                 return (
-                  <div
+                  <details
                     key={i}
                     style={{
                       fontSize: "0.8rem",
@@ -76,16 +93,75 @@ export function MessageBubble({ message }: { message: OHUIMessage }) {
                       fontFamily: "monospace",
                     }}
                   >
-                    <strong>{toolName}</strong>
-                    {toolPart.state === "output" && (
-                      <span style={{ color: "#4a4" }}> (done)</span>
-                    )}
-                    {(toolPart.state === "input-streaming" ||
-                      toolPart.state === "input-available" ||
-                      toolPart.state === "call") && (
-                      <span style={{ color: "#888" }}> (running...)</span>
-                    )}
-                  </div>
+                    <summary style={{ cursor: "pointer" }}>
+                      <strong>{toolName}</strong>
+                      <span style={{ color: "#888" }}>
+                        {" "}({summaryRight})
+                      </span>
+                    </summary>
+
+                    <div
+                      style={{
+                        marginTop: "0.35rem",
+                        display: "grid",
+                        gap: "0.35rem",
+                      }}
+                    >
+                      <div style={{ color: "#666" }}>
+                        toolCallId: {toolPart.toolCallId}
+                      </div>
+
+                      {input !== undefined && (
+                        <div>
+                          <div style={{ color: "#666", marginBottom: 4 }}>
+                            Input
+                          </div>
+                          <pre
+                            style={{
+                              margin: 0,
+                              padding: "0.4rem 0.5rem",
+                              borderRadius: 6,
+                              background: isUser
+                                ? "rgba(0,0,0,0.25)"
+                                : "rgba(255,255,255,0.65)",
+                              overflowX: "auto",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {pretty(input)}
+                          </pre>
+                        </div>
+                      )}
+
+                      {output !== undefined && (
+                        <div>
+                          <div style={{ color: "#666", marginBottom: 4 }}>
+                            Output
+                          </div>
+                          <pre
+                            style={{
+                              margin: 0,
+                              padding: "0.4rem 0.5rem",
+                              borderRadius: 6,
+                              background: isUser
+                                ? "rgba(0,0,0,0.25)"
+                                : "rgba(255,255,255,0.65)",
+                              overflowX: "auto",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {pretty(output)}
+                          </pre>
+                        </div>
+                      )}
+
+                      {errorText && (
+                        <div style={{ color: "#b00" }}>Error: {errorText}</div>
+                      )}
+                    </div>
+                  </details>
                 );
               }
               return null;
