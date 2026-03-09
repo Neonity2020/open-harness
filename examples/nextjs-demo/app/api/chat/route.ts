@@ -25,7 +25,7 @@ const agent = new Agent({
     "Be concise and direct in your responses.",
   model: openai("gpt-5.2"),
   tools: { readFile, listFiles, grep, bash },
-  maxSteps: 20,
+  maxSteps: 100,
   subagents: [explore],
   instructions: false,
 });
