@@ -67,6 +67,25 @@ export function MessageBubble({ message }: { message: OHUIMessage }) {
                     ? (part as any).toolName ?? "tool"
                     : part.type.replace("tool-", "");
 
+                // Render announce calls as styled narration, not tool blocks
+                if (toolName === "announce") {
+                  const text = toolPart.input?.message ?? toolPart.output ?? "";
+                  if (!text) return null;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        fontSize: "0.85rem",
+                        fontStyle: "italic",
+                        color: "#666",
+                        padding: "0.3rem 0",
+                      }}
+                    >
+                      {text}
+                    </div>
+                  );
+                }
+
                 const state = toolPart.state as string | undefined;
                 const input = toolPart.input;
                 const output = toolPart.output;
