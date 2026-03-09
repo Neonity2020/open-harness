@@ -82,3 +82,7 @@ export {
   formatFinishMessage,
   formatDone,
 } from "./types/stream-parts.js";
+
+// ── UI Stream ───────────────────────────────────────────────────────
+
+export { sessionEventsToUIStream } from "./ui-stream.js";

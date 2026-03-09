@@ -1,5 +1,11 @@
-import { generateText, type LanguageModel, type ModelMessage } from "ai";
+import {
+  generateText,
+  createUIMessageStreamResponse,
+  type LanguageModel,
+  type ModelMessage,
+} from "ai";
 import { Agent, type AgentEvent, type TokenUsage } from "./agent.js";
+import { sessionEventsToUIStream } from "./ui-stream.js";
 
 // ── Session Events ──────────────────────────────────────────────────
 
@@ -548,6 +554,33 @@ export class Session {
     this.messages = result.messages;
     const tokensAfter = defaultEstimateTokens(this.messages);
     yield { type: "compaction.done", tokensBefore, tokensAfter };
+  }
+
+  /**
+   * Convert a session turn into an AI SDK 5 UIMessage stream.
+   * Returns a ReadableStream of typed UIMessageChunks that can be
+   * passed to `createUIMessageStreamResponse()` or consumed directly.
+   */
+  toUIMessageStream(
+    input: string | ModelMessage[],
+    options?: { signal?: AbortSignal },
+  ): ReadableStream {
+    return sessionEventsToUIStream(this.send(input, options), options);
+  }
+
+  /**
+   * Convert a session turn into an HTTP Response with SSE encoding.
+   * Ready to return from any HTTP handler (Next.js, Express, etc.).
+   */
+  toResponse(
+    input: string | ModelMessage[],
+    init?: ResponseInit & { signal?: AbortSignal },
+  ): Response {
+    const { signal, ...responseInit } = init ?? {};
+    return createUIMessageStreamResponse({
+      stream: this.toUIMessageStream(input, { signal }),
+      ...responseInit,
+    });
   }
 
   private shouldCompactCheck(): boolean {
