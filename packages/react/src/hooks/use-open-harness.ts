@@ -9,6 +9,8 @@ export interface UseOpenHarnessConfig extends OHTransportOptions {
   endpoint: string;
   /** Stable chat ID for sharing state across components. */
   id?: string;
+  /** Initial messages to populate the chat with (e.g. loaded from persistence). */
+  messages?: OHUIMessage[];
   /** Called when the assistant message finishes streaming. */
   onFinish?: (message: OHUIMessage) => void;
 }
@@ -31,6 +33,7 @@ export function useOpenHarness(
   if (!chatRef.current) {
     chatRef.current = new Chat<OHUIMessage>({
       id: config.id,
+      messages: config.messages,
       transport: createOHTransport<OHUIMessage>(config.endpoint, config),
       onData: (part) => dispatch(part),
       onFinish: config.onFinish
