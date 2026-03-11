@@ -247,6 +247,7 @@ describe("sessionEventsToUIStream", () => {
       expect(subStart[0].data).toEqual({
         agentName: "explore",
         task: "search codebase",
+        path: ["explore"],
       });
     });
 

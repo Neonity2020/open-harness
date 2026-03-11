@@ -6,7 +6,8 @@ export interface SubagentInfo {
   name: string;
   task: string;
   status: "running" | "done" | "error";
-  parentAgent?: string;
+  /** Full ancestry path from outermost to innermost agent, e.g. ["explore"] or ["explore", "search"]. */
+  path: string[];
   startedAt: number;
   durationMs?: number;
   error?: string;

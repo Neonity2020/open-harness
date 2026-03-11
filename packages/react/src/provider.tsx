@@ -39,29 +39,31 @@ export function OpenHarnessProvider({ children }: OpenHarnessProviderProps) {
       switch (part.type) {
         // ── Subagent events ──────────────────────────────────────
         case "data-oh:subagent.start": {
-          const name = data?.agentName ?? "unknown";
+          const path: string[] = data?.path ?? [data?.agentName ?? "unknown"];
+          const key = path.join("/");
           const info: SubagentInfo = {
-            name,
+            name: path[path.length - 1],
             task: data?.task ?? "",
             status: "running",
-            parentAgent: data?.parentAgent,
+            path,
             startedAt: Date.now(),
           };
           setSubagents((prev) => {
             const next = new Map(prev);
-            next.set(name, info);
+            next.set(key, info);
             return next;
           });
           break;
         }
 
         case "data-oh:subagent.done": {
-          const name = data?.agentName ?? "unknown";
+          const path: string[] = data?.path ?? [data?.agentName ?? "unknown"];
+          const key = path.join("/");
           setSubagents((prev) => {
-            const existing = prev.get(name);
+            const existing = prev.get(key);
             if (!existing) return prev;
             const next = new Map(prev);
-            next.set(name, {
+            next.set(key, {
               ...existing,
               status: "done",
               durationMs: data?.durationMs ?? Date.now() - existing.startedAt,
@@ -72,12 +74,13 @@ export function OpenHarnessProvider({ children }: OpenHarnessProviderProps) {
         }
 
         case "data-oh:subagent.error": {
-          const name = data?.agentName ?? "unknown";
+          const path: string[] = data?.path ?? [data?.agentName ?? "unknown"];
+          const key = path.join("/");
           setSubagents((prev) => {
-            const existing = prev.get(name);
+            const existing = prev.get(key);
             if (!existing) return prev;
             const next = new Map(prev);
-            next.set(name, {
+            next.set(key, {
               ...existing,
               status: "error",
               error: data?.error ?? "Unknown error",

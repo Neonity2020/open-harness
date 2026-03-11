@@ -58,8 +58,14 @@ export interface ToolCallInfo {
  */
 export type ApproveFn = (toolCall: ToolCallInfo) => boolean | Promise<boolean>;
 
-/** Called for every event emitted by a subagent during a task tool call. */
-export type SubagentEventFn = (agentName: string, event: AgentEvent) => void;
+/**
+ * Called for every event emitted by a subagent during a task tool call.
+ *
+ * `path` is the ancestry chain from outermost to innermost agent, e.g.
+ * `["explore"]` for a direct subagent, or `["explore", "search"]` when
+ * a subagent spawns its own subagent.
+ */
+export type SubagentEventFn = (path: string[], event: AgentEvent) => void;
 
 // ── Agent ────────────────────────────────────────────────────────────
 
@@ -72,8 +78,12 @@ export class Agent {
   readonly temperature?: number;
   readonly maxTokens?: number;
   readonly instructions: boolean;
+  readonly maxSubagentDepth: number;
   readonly approve?: ApproveFn;
   readonly onSubagentEvent?: SubagentEventFn;
+
+  /** Original subagent templates (stored so nested children can inherit them). */
+  readonly subagents?: Agent[];
 
   /** Static tools provided at construction time. */
   readonly tools?: ToolSet;
@@ -103,6 +113,12 @@ export class Agent {
     approve?: ApproveFn;
     /** Agents available as subagents via the auto-generated `task` tool. */
     subagents?: Agent[];
+    /**
+     * Maximum nesting depth for subagents. Defaults to `1` (direct subagents
+     * only, no nesting). Set to `2` to allow sub-subagents, etc.
+     * `0` effectively disables subagents even if `subagents` is provided.
+     */
+    maxSubagentDepth?: number;
     /** Called for every event emitted by a subagent during a task tool call. */
     onSubagentEvent?: SubagentEventFn;
     /**
@@ -121,15 +137,17 @@ export class Agent {
     this.temperature = options.temperature;
     this.maxTokens = options.maxTokens;
     this.instructions = options.instructions ?? true;
+    this.maxSubagentDepth = options.maxSubagentDepth ?? 1;
     this.approve = options.approve;
     this.onSubagentEvent = options.onSubagentEvent;
+    this.subagents = options.subagents;
     this.mcpServerConfigs = options.mcpServers;
 
-    // Merge the task tool into the toolset when subagents are provided
-    if (options.subagents?.length) {
+    // Merge the task tool into the toolset when subagents are provided and depth > 0
+    if (options.subagents?.length && this.maxSubagentDepth > 0) {
       this.tools = {
         ...(options.tools ?? {}),
-        task: createTaskTool(options.subagents, this.onSubagentEvent),
+        task: createTaskTool(options.subagents, this.maxSubagentDepth, this.onSubagentEvent),
       };
     } else {
       this.tools = options.tools;
@@ -315,7 +333,11 @@ export class Agent {
 
 // ── Subagent task tool ───────────────────────────────────────────────
 
-function createTaskTool(subagents: Agent[], onSubagentEvent?: SubagentEventFn) {
+function createTaskTool(
+  subagents: Agent[],
+  remainingDepth: number,
+  onSubagentEvent?: SubagentEventFn,
+) {
   const names = subagents.map((a) => a.name);
   const byName = new Map(subagents.map((a) => [a.name, a]));
 
@@ -340,6 +362,13 @@ function createTaskTool(subagents: Agent[], onSubagentEvent?: SubagentEventFn) {
     ) => {
       const template = byName.get(agentName)!;
 
+      // Bubble nested events up with the current agent prepended to the path
+      const childOnSubagentEvent: SubagentEventFn | undefined = onSubagentEvent
+        ? (childPath, event) => onSubagentEvent([agentName, ...childPath], event)
+        : undefined;
+
+      const nextDepth = remainingDepth - 1;
+
       // Fresh agent instance for each task — no shared state
       const child = new Agent({
         name: template.name,
@@ -351,12 +380,19 @@ function createTaskTool(subagents: Agent[], onSubagentEvent?: SubagentEventFn) {
         maxTokens: template.maxTokens,
         instructions: template.instructions,
         // No approve — subagents run autonomously
-        // No subagents — prevent recursive nesting
+        // Pass subagents through when there is remaining depth
+        ...(nextDepth > 0 && template.subagents?.length
+          ? {
+              subagents: template.subagents,
+              maxSubagentDepth: nextDepth,
+              onSubagentEvent: childOnSubagentEvent,
+            }
+          : {}),
       });
 
       let lastText = "";
       for await (const event of child.run([], prompt, { signal: abortSignal })) {
-        onSubagentEvent?.(agentName, event);
+        onSubagentEvent?.([agentName], event);
         if (event.type === "text.done") {
           lastText = event.text;
         }

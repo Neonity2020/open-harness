@@ -23,8 +23,9 @@ export function sessionEventsToUIStream(
       let textPartId: string | null = null;
       let reasoningPartId: string | null = null;
 
-      // Track subagent start times for duration calculation
+      // Track subagent start times and names for duration calculation and done/error events
       const subagentStartTimes = new Map<string, number>();
+      const subagentNames = new Map<string, string>();
 
       const enqueue = (chunk: OHChunk) => controller.enqueue(chunk);
 
@@ -112,11 +113,13 @@ export function sessionEventsToUIStream(
                 const input = event.input as { agent?: string; prompt?: string };
                 if (input.agent) {
                   subagentStartTimes.set(event.toolCallId, Date.now());
+                  subagentNames.set(event.toolCallId, input.agent);
                   enqueue({
                     type: "data-oh:subagent.start",
                     data: {
                       agentName: input.agent,
                       task: input.prompt ?? "",
+                      path: [input.agent],
                     },
                   });
                 }
@@ -135,12 +138,15 @@ export function sessionEventsToUIStream(
               if (event.toolName === "task") {
                 const startTime = subagentStartTimes.get(event.toolCallId);
                 const durationMs = startTime ? Date.now() - startTime : 0;
+                const agentName = subagentNames.get(event.toolCallId) ?? "unknown";
                 subagentStartTimes.delete(event.toolCallId);
+                subagentNames.delete(event.toolCallId);
                 enqueue({
                   type: "data-oh:subagent.done",
                   data: {
-                    agentName: event.toolName,
+                    agentName,
                     durationMs,
+                    path: [agentName],
                   },
                 });
               }
@@ -156,12 +162,15 @@ export function sessionEventsToUIStream(
 
               // If this is a task tool (subagent), emit subagent error data part
               if (event.toolName === "task") {
+                const agentName = subagentNames.get(event.toolCallId) ?? "unknown";
                 subagentStartTimes.delete(event.toolCallId);
+                subagentNames.delete(event.toolCallId);
                 enqueue({
                   type: "data-oh:subagent.error",
                   data: {
-                    agentName: event.toolName,
+                    agentName,
                     error: event.error,
+                    path: [agentName],
                   },
                 });
               }

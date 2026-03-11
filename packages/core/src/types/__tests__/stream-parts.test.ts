@@ -128,11 +128,12 @@ describe("formatDataPart", () => {
     const result = formatDataPart("oh:subagent.start", {
       agentName: "explore",
       task: "search the codebase",
+      path: ["explore"],
     });
     const parsed = parseSSE(result);
     expect(parsed).toEqual({
       type: "data-oh:subagent.start",
-      data: { agentName: "explore", task: "search the codebase" },
+      data: { agentName: "explore", task: "search the codebase", path: ["explore"] },
     });
   });
 

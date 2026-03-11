@@ -81,9 +81,12 @@ async function promptApproval({ toolName, toolCallId, input }: ToolCallInfo): Pr
 
 let subStreaming = false;
 
-function onSubagentEvent(agentName: string, event: AgentEvent) {
+function onSubagentEvent(path: string[], event: AgentEvent) {
+  const depth = path.length;
+  const indent = "  ".repeat(depth);
   const inner = chalk.dim("│");
-  const prefix = `  ${BAR}   ${inner}`;
+  const prefix = `  ${BAR} ${indent}${inner}`;
+  const label = path.join(chalk.dim(" > "));
 
   switch (event.type) {
     case "step.start":
@@ -91,7 +94,7 @@ function onSubagentEvent(agentName: string, event: AgentEvent) {
         // Stop the parent task spinner to make room for subagent output
         for (const s of spinners.values()) s.stop();
         spinners.clear();
-        console.log(`  ${BAR}   ${chalk.dim("┌")} ${chalk.magenta(agentName)}`);
+        console.log(`  ${BAR} ${indent}${chalk.dim("┌")} ${chalk.magenta(label)}`);
       }
       break;
 
@@ -127,7 +130,7 @@ function onSubagentEvent(agentName: string, event: AgentEvent) {
       break;
 
     case "done":
-      console.log(`  ${BAR}   ${chalk.dim("└ done")}`);
+      console.log(`  ${BAR} ${indent}${chalk.dim("└ done")}`);
       break;
   }
 }

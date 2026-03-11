@@ -9,15 +9,18 @@ export type OHDataTypes = {
   "oh:subagent.start": {
     agentName: string;
     task: string;
-    parentAgent?: string;
+    /** Full ancestry path from outermost to innermost agent, e.g. ["explore"] or ["explore", "search"]. */
+    path: string[];
   };
   "oh:subagent.done": {
     agentName: string;
     durationMs: number;
+    path: string[];
   };
   "oh:subagent.error": {
     agentName: string;
     error: string;
+    path: string[];
   };
   "oh:compaction.start": Record<string, never>;
   "oh:compaction.done": {
