@@ -1,7 +1,7 @@
 import { openai } from "@ai-sdk/openai";
 import { tool } from "ai";
 import { z } from "zod";
-import { Agent, Session } from "@openharness/core";
+import { Agent, Session, extractUserInput } from "@openharness/core";
 import { readFile, listFiles, grep } from "@openharness/core/tools/fs";
 import { bash } from "@openharness/core/tools/bash";
 
@@ -72,13 +72,6 @@ export async function POST(req: Request) {
   const { id, messages } = await req.json();
   const session = getOrCreateSession(id);
 
-  // Extract the last user message text from the AI SDK 5 messages array
-  // UIMessage uses `parts` (not `content`)
-  const lastMessage = messages[messages.length - 1];
-  const text = lastMessage.parts
-    .filter((p: any) => p.type === "text")
-    .map((p: any) => p.text)
-    .join("");
-
-  return session.toResponse(text);
+  const input = await extractUserInput(messages);
+  return session.toResponse(input);
 }

@@ -55,6 +55,49 @@ export function MessageBubble({ message }: { message: OHUIMessage }) {
                 </details>
               );
 
+            case "file": {
+              const filePart = part as any;
+              const isImage = filePart.mediaType?.startsWith("image/");
+              if (isImage) {
+                return (
+                  <img
+                    key={i}
+                    src={filePart.url}
+                    alt={filePart.filename ?? "image"}
+                    style={{
+                      maxWidth: "100%",
+                      maxHeight: 300,
+                      borderRadius: 8,
+                      margin: "0.3rem 0",
+                      display: "block",
+                    }}
+                  />
+                );
+              }
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    padding: "0.25rem 0.6rem",
+                    margin: "0.3rem 0",
+                    borderRadius: 6,
+                    background: isUser
+                      ? "rgba(255,255,255,0.15)"
+                      : "#e0e0e0",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  <span>{filePart.filename ?? "file"}</span>
+                  <span style={{ color: "#888", fontSize: "0.75rem" }}>
+                    {filePart.mediaType}
+                  </span>
+                </div>
+              );
+            }
+
             default: {
               // Handle tool parts (type: "tool-*" or "dynamic-tool")
               if (
