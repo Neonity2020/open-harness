@@ -93,6 +93,10 @@ export {
   formatDone,
 } from "./types/stream-parts.js";
 
+// ── Message utilities ────────────────────────────────────────────────
+
+export { extractUserInput } from "./messages.js";
+
 // ── UI Stream ───────────────────────────────────────────────────────
 
 export { sessionEventsToUIStream } from "./ui-stream.js";
