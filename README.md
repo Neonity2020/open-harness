@@ -132,6 +132,7 @@ The full set of events emitted by `run()`:
 | `approve` | — | Callback for tool call approval (see [Permissions](#permissions)) |
 | `subagents` | — | Child agents available via the `task` tool (see [Subagents](#subagents)) |
 | `maxSubagentDepth` | `1` | Maximum nesting depth for subagents. `1` = direct subagents only, `2` = sub-subagents, etc. |
+| `subagentBackground` | — | Enable background subagent execution with lifecycle tools (see [Background subagents](#background-subagents)) |
 | `mcpServers` | — | MCP servers to connect to (see [MCP Servers](#mcp-servers)) |
 | `skills` | — | Skills configuration (see [Skills](#skills)) |
 
@@ -473,6 +474,95 @@ const agent = new Agent({
 The `path` parameter is a `string[]` representing the full ancestry from outermost to innermost agent. For a direct subagent it's `["explore"]`; for a nested sub-subagent it's `["explore", "search"]`. Events from nested subagents automatically bubble up through the chain.
 
 The callback receives the same `AgentEvent` types as the parent's `run()` generator.
+
+### Background subagents
+
+By default, all subagent calls are synchronous — the parent blocks until the child finishes. Enable `subagentBackground` to let the parent spawn agents in the background, do other work, and collect results later. This works like JavaScript's `Promise` combinators (`Promise.all`, `Promise.any`, `Promise.race`, `Promise.allSettled`).
+
+```typescript
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.2"),
+  tools: { ...fsTools, bash },
+  subagents: [explore, researcher, coder],
+  subagentBackground: true, // enable with defaults
+});
+```
+
+When enabled, three things happen:
+
+1. The `task` tool gains an optional `background` parameter. When `true`, the agent is spawned in the background and the tool returns immediately with an agent ID.
+2. An `agent_await` tool is registered for waiting on background agents using different strategies.
+3. `agent_status` and `agent_cancel` tools are registered for checking on and cancelling background agents.
+
+The model orchestrates everything naturally through tool calls:
+
+```
+// Model spawns two background agents and one foreground agent in one step:
+task({ agent: "researcher", prompt: "Find deprecated APIs", background: true })   → "bg-1"
+task({ agent: "researcher", prompt: "Check test coverage", background: true })    → "bg-2"
+task({ agent: "coder", prompt: "Refactor config parser", background: false })     → (blocks)
+
+// Next step — model has the coder result, now collects background results:
+agent_await({ ids: ["bg-1", "bg-2"], mode: "all" })  → both results
+```
+
+#### Await modes
+
+The `agent_await` tool supports four modes, matching JavaScript's `Promise` combinators:
+
+| Mode | Behavior |
+| --- | --- |
+| `all` | Wait for all agents to succeed. Fails fast if any agent fails. |
+| `allSettled` | Wait for all agents to finish. Returns results and errors. |
+| `any` | Wait for the first agent to succeed. Only fails if all agents fail. |
+| `race` | Wait for the first agent to settle (succeed or fail). |
+
+#### Configuration
+
+Pass `true` for sensible defaults, or an object for fine-grained control:
+
+```typescript
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.2"),
+  tools: { ...fsTools, bash },
+  subagents: [explore, researcher],
+  subagentBackground: {
+    maxConcurrent: 3,           // max simultaneous background agents (default: Infinity)
+    timeout: 120_000,           // auto-cancel after 2 minutes (default: none)
+    autoCancel: true,           // cancel background agents on agent.close() (default: true)
+    tools: {
+      status: true,             // register agent_status tool (default: true)
+      cancel: true,             // register agent_cancel tool (default: true)
+      await: ["all", "race"],   // which await modes to expose (default: all four)
+    },
+  },
+});
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `maxConcurrent` | `Infinity` | Maximum number of background agents running simultaneously |
+| `timeout` | — | Auto-cancel background agents after this many milliseconds |
+| `autoCancel` | `true` | Cancel all running background agents when `agent.close()` is called |
+| `tools.status` | `true` | Register the `agent_status` tool |
+| `tools.cancel` | `true` | Register the `agent_cancel` tool |
+| `tools.await` | all four modes | Which await modes to expose. `true` = all, `false` = disable, or an array of specific modes |
+
+#### Lifecycle tools
+
+When `subagentBackground` is enabled, these tools are auto-registered alongside the `task` tool:
+
+| Tool | Description |
+| --- | --- |
+| `agent_status` | Non-blocking status check. Returns the agent's current status (`running`, `done`, `failed`, `cancelled`) and result if available. |
+| `agent_cancel` | Cancel a running background agent via its ID. |
+| `agent_await` | Block until background agents complete, using one of the four await modes. |
+
+#### Cleanup
+
+Background agents respect the parent's abort signal — if the parent is aborted, all background children are cancelled. When `autoCancel` is `true` (the default), calling `agent.close()` cancels any still-running background agents.
 
 ## AGENTS.md
 
