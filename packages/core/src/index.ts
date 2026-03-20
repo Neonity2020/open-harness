@@ -111,3 +111,23 @@ export { extractUserInput } from "./messages.js";
 // ── UI Stream ───────────────────────────────────────────────────────
 
 export { sessionEventsToUIStream } from "./ui-stream.js";
+
+// ── Runner & Middleware ─────────────────────────────────────────────
+
+export { type Runner, type Middleware, pipe, apply, toRunner } from "./runner.js";
+
+// ── Stream Combinators ──────────────────────────────────────────────
+
+export { tap, filter, map, takeUntil } from "./stream.js";
+
+// ── Middleware ──────────────────────────────────────────────────────
+
+export { withRetry } from "./middleware/retry.js";
+export { withCompaction, type CompactionConfig } from "./middleware/compaction.js";
+export { withTurnTracking } from "./middleware/turn-tracking.js";
+export { withPersistence, type PersistenceConfig } from "./middleware/persistence.js";
+export { withHooks } from "./middleware/hooks.js";
+
+// ── Conversation ───────────────────────────────────────────────────
+
+export { Conversation, type ConversationOptions } from "./conversation.js";
