@@ -293,6 +293,122 @@ describe("sessionEventsToUIStream", () => {
       expect(subError[0].data.error).toBe("Agent crashed");
     });
 
+    it("emits data-oh:subagent.start for background task tool calls", async () => {
+      const chunks = await collectChunks([
+        {
+          type: "tool.start",
+          toolCallId: "tc-bg",
+          toolName: "task",
+          input: { agent: "researcher", prompt: "find info", background: true },
+        },
+      ]);
+
+      const subStart = findChunks(chunks, "data-oh:subagent.start");
+      expect(subStart).toHaveLength(1);
+      expect(subStart[0].data).toEqual({
+        agentName: "researcher",
+        task: "find info",
+        path: ["researcher"],
+      });
+    });
+
+    it("suppresses data-oh:subagent.done for background task tool calls", async () => {
+      const chunks = await collectChunks([
+        {
+          type: "tool.start",
+          toolCallId: "tc-bg",
+          toolName: "task",
+          input: { agent: "researcher", prompt: "find info", background: true },
+        },
+        {
+          type: "tool.done",
+          toolCallId: "tc-bg",
+          toolName: "task",
+          output: '<background_spawn agent_id="bg-1">spawned</background_spawn>',
+        },
+      ]);
+
+      const subDone = findChunks(chunks, "data-oh:subagent.done");
+      expect(subDone).toHaveLength(0);
+    });
+
+    it("still emits data-oh:subagent.done for foreground task tool calls", async () => {
+      const chunks = await collectChunks([
+        {
+          type: "tool.start",
+          toolCallId: "tc-fg",
+          toolName: "task",
+          input: { agent: "coder", prompt: "fix bug" },
+        },
+        {
+          type: "tool.done",
+          toolCallId: "tc-fg",
+          toolName: "task",
+          output: "<task_result>fixed</task_result>",
+        },
+      ]);
+
+      const subDone = findChunks(chunks, "data-oh:subagent.done");
+      expect(subDone).toHaveLength(1);
+    });
+
+    it("emits data-oh:subagent.error for background task tool errors", async () => {
+      const chunks = await collectChunks([
+        {
+          type: "tool.start",
+          toolCallId: "tc-bg",
+          toolName: "task",
+          input: { agent: "researcher", prompt: "find info", background: true },
+        },
+        {
+          type: "tool.error",
+          toolCallId: "tc-bg",
+          toolName: "task",
+          error: "Spawn failed",
+        },
+      ]);
+
+      const subError = findChunks(chunks, "data-oh:subagent.error");
+      expect(subError).toHaveLength(1);
+      expect(subError[0].data.error).toBe("Spawn failed");
+    });
+
+    it("handles mixed foreground and background task calls", async () => {
+      const chunks = await collectChunks([
+        {
+          type: "tool.start",
+          toolCallId: "tc-bg",
+          toolName: "task",
+          input: { agent: "researcher", prompt: "bg work", background: true },
+        },
+        {
+          type: "tool.start",
+          toolCallId: "tc-fg",
+          toolName: "task",
+          input: { agent: "coder", prompt: "fg work" },
+        },
+        {
+          type: "tool.done",
+          toolCallId: "tc-bg",
+          toolName: "task",
+          output: "spawned",
+        },
+        {
+          type: "tool.done",
+          toolCallId: "tc-fg",
+          toolName: "task",
+          output: "completed",
+        },
+      ]);
+
+      const subStart = findChunks(chunks, "data-oh:subagent.start");
+      expect(subStart).toHaveLength(2);
+
+      const subDone = findChunks(chunks, "data-oh:subagent.done");
+      expect(subDone).toHaveLength(1);
+      expect(subDone[0].data.agentName).toBe("coder");
+    });
+
     it("does not emit subagent events for regular tools", async () => {
       const chunks = await collectChunks([
         {
