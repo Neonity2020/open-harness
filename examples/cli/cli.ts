@@ -4,7 +4,12 @@ import chalk from "chalk";
 import ora from "ora";
 import {
   Agent,
-  Session,
+  Conversation,
+  toRunner,
+  apply,
+  withTurnTracking,
+  withCompaction,
+  withRetry,
   type AgentEvent,
   type ToolCallInfo,
   type SessionEvent,
@@ -164,10 +169,16 @@ const agent = new Agent({
   onSubagentEvent,
 });
 
-const session = new Session({
-  agent,
-  contextWindow: 200_000,
-});
+// ── Compose middleware ───────────────────────────────────────────────
+
+const runner = apply(
+  toRunner(agent),
+  withTurnTracking(),
+  withCompaction({ contextWindow: 200_000, model: agent.model }),
+  withRetry(),
+);
+
+const chat = new Conversation({ runner });
 
 // ── Main loop ────────────────────────────────────────────────────────
 
@@ -176,7 +187,7 @@ async function main() {
   console.log(
     `  ${chalk.bold.cyan("open-harness")} ${chalk.dim("gpt-5.2 · fs tools · explore subagent")}`,
   );
-  console.log(`  ${chalk.dim('Type "exit" to quit. "/compact" to trigger compaction.')}`);
+  console.log(`  ${chalk.dim('Type "exit" to quit.')}`);
 
   while (true) {
     console.log();
@@ -184,40 +195,12 @@ async function main() {
     if (input.trim().toLowerCase() === "exit") break;
     if (!input.trim()) continue;
 
-    // Slash command: /compact
-    if (input.trim() === "/compact") {
-      console.log();
-      for await (const event of session.compact()) {
-        switch (event.type) {
-          case "compaction.start":
-            console.log(
-              `  ${chalk.dim("⟳")} Compacting... (${event.tokensBefore} estimated tokens)`,
-            );
-            break;
-          case "compaction.pruned":
-            console.log(
-              `  ${chalk.dim("⟳")} Pruned ${event.messagesRemoved} messages (${event.tokensRemoved} tokens)`,
-            );
-            break;
-          case "compaction.summary":
-            console.log(`  ${chalk.dim("⟳")} Generated summary`);
-            break;
-          case "compaction.done":
-            console.log(
-              `  ${chalk.green("✔")} Compacted: ${event.tokensBefore} → ${event.tokensAfter} estimated tokens`,
-            );
-            break;
-        }
-      }
-      continue;
-    }
-
     console.log();
 
     let doneEvent: Extract<SessionEvent, { type: "done" }> | undefined;
     let streaming = false;
 
-    for await (const event of session.send(input)) {
+    for await (const event of chat.send(input)) {
       switch (event.type) {
         case "turn.start":
           break;

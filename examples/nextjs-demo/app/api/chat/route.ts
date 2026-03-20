@@ -1,7 +1,18 @@
 import { openai } from "@ai-sdk/openai";
 import { tool } from "ai";
 import { z } from "zod";
-import { Agent, Session, extractUserInput } from "@openharness/core";
+import {
+  Agent,
+  Conversation,
+  toRunner,
+  apply,
+  withTurnTracking,
+  withCompaction,
+  withRetry,
+  withPersistence,
+  extractUserInput,
+  type SessionStore,
+} from "@openharness/core";
 import { readFile, listFiles, grep } from "@openharness/core/tools/fs";
 import { bash } from "@openharness/core/tools/bash";
 
@@ -48,30 +59,48 @@ const agent = new Agent({
   instructions: false,
 });
 
-// ── Session store (in-memory, per-conversation) ─────────────────────
+// ── In-memory store ─────────────────────────────────────────────────
 
-const sessions = new Map<string, Session>();
+const messageStore = new Map<string, any[]>();
 
-function getOrCreateSession(conversationId?: string): Session {
+const store: SessionStore = {
+  async load(sessionId) {
+    return messageStore.get(sessionId);
+  },
+  async save(sessionId, messages) {
+    messageStore.set(sessionId, messages);
+  },
+};
+
+// ── Conversation cache (per session) ─────────────────────────────────
+
+const conversations = new Map<string, Conversation>();
+
+function getOrCreateConversation(conversationId?: string): Conversation {
   const id = conversationId ?? crypto.randomUUID();
-  let session = sessions.get(id);
-  if (!session) {
-    session = new Session({
-      agent,
-      sessionId: id,
-      contextWindow: 128_000,
-    });
-    sessions.set(id, session);
+  let conv = conversations.get(id);
+  if (!conv) {
+    // Compose middleware: turn tracking → compaction → retry → persistence
+    const runner = apply(
+      toRunner(agent),
+      withTurnTracking(),
+      withCompaction({ contextWindow: 128_000, model: agent.model }),
+      withRetry(),
+      withPersistence({ store, sessionId: id }),
+    );
+
+    conv = new Conversation({ runner, sessionId: id, store });
+    conversations.set(id, conv);
   }
-  return session;
+  return conv;
 }
 
 // ── Route handler ───────────────────────────────────────────────────
 
 export async function POST(req: Request) {
   const { id, messages } = await req.json();
-  const session = getOrCreateSession(id);
+  const conv = getOrCreateConversation(id);
 
   const input = await extractUserInput(messages);
-  return session.toResponse(input);
+  return conv.toResponse(input);
 }
