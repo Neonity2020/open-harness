@@ -131,3 +131,17 @@ export { withHooks } from "./middleware/hooks.js";
 // ── Conversation ───────────────────────────────────────────────────
 
 export { Conversation, type ConversationOptions } from "./conversation.js";
+
+// ── Tools ─────────────────────────────────────────────────────────
+
+export {
+  readFile,
+  writeFile,
+  editFile,
+  listFiles,
+  grep,
+  deleteFile,
+  fsTools,
+} from "./tools/fs.js";
+
+export { bash, bashTools } from "./tools/bash.js";
