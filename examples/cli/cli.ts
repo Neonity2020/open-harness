@@ -14,8 +14,13 @@ import {
   type ToolCallInfo,
   type SessionEvent,
 } from "@openharness/core";
-import { fsTools, readFile, listFiles, grep } from "@openharness/core/tools/fs";
-import { bash } from "@openharness/core/tools/bash";
+import { createFsTools, createBashTool, NodeFsProvider, NodeShellProvider } from "@openharness/core";
+
+const fsProvider = new NodeFsProvider();
+const shellProvider = new NodeShellProvider();
+const fsTools = createFsTools(fsProvider);
+const { readFile, listFiles, grep } = fsTools;
+const { bash } = createBashTool(shellProvider);
 
 // ── Readline setup ───────────────────────────────────────────────────
 
