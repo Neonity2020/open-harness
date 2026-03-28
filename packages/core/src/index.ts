@@ -159,17 +159,3 @@ export type {
 export { createFsTools, type CreateFsToolsOptions } from "./tools/create-fs-tools.js";
 export { createBashTool } from "./tools/create-bash-tool.js";
 export { createLocalTools } from "./tools/create-local-tools.js";
-
-// ── Tools (pre-built with Node provider) ────────────────────────
-
-export {
-  readFile,
-  writeFile,
-  editFile,
-  listFiles,
-  grep,
-  deleteFile,
-  fsTools,
-} from "./tools/fs.js";
-
-export { bash, bashTools } from "./tools/bash.js";
