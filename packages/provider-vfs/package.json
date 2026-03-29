@@ -1,0 +1,45 @@
+{
+  "name": "@openharness/provider-vfs",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Virtual filesystem provider for @openharness/core — sandboxed, in-memory, or SQLite-backed file access for AI agents",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "agent",
+    "ai",
+    "vfs",
+    "virtual-filesystem",
+    "sandbox",
+    "openharness"
+  ],
+  "license": "ISC",
+  "dependencies": {
+    "@openharness/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@platformatic/vfs": ">=0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@platformatic/vfs": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@platformatic/vfs": "^0.3.0",
+    "@types/node": "^25.3.0",
+    "typescript": "^5.9.3"
+  }
+}
