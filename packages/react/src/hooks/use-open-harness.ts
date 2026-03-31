@@ -37,7 +37,10 @@ export function useOpenHarness(
 ): UseChatHelpers<OHUIMessage> {
   const { dispatch } = useOHContext();
   const chat = useChat<OHUIMessage>({
-    id: config.id,
+    // Only pass `id` when explicitly provided. Passing `undefined` causes
+    // AI SDK's useChat to recreate the Chat instance on every render because
+    // the auto-generated id never matches the `undefined` in options.
+    ...(config.id != null && { id: config.id }),
     messages: config.messages,
     transport: createOHTransport<OHUIMessage>(config.endpoint, config),
     onData: (part) => dispatch(part),
