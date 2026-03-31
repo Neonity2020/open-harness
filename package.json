@@ -6,7 +6,9 @@
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck",
     "format": "pnpm -r format",
-    "format:check": "pnpm -r format:check"
+    "format:check": "pnpm -r format:check",
+    "dev:docs": "pnpm --filter docs dev",
+    "dev:web": "pnpm --filter @openharness/web dev"
   },
   "devDependencies": {
     "jsdom": "^26.1.0",
