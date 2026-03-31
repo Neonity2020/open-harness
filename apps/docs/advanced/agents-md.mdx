@@ -1,0 +1,36 @@
+---
+title: AGENTS.md
+description: Automatic instruction loading from project files
+---
+
+OpenHarness supports the [AGENTS.md](https://agents.md) spec. On first run, the agent walks up from the current directory to the filesystem root looking for `AGENTS.md` or `CLAUDE.md`. The first file found is loaded and prepended to the system prompt.
+
+## How It Works
+
+When an agent runs for the first time, it:
+
+1. Starts from the current working directory
+2. Walks up the directory tree toward the filesystem root
+3. Looks for `AGENTS.md` or `CLAUDE.md` at each level
+4. Loads the first file found and prepends its content to the system prompt
+
+This allows you to define project-specific instructions that any agent running in that directory will automatically pick up.
+
+## Disabling Instructions
+
+This behavior is enabled by default. Set `instructions: false` to disable it:
+
+```typescript
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.4"),
+  tools: { ...fsTools, bash },
+  instructions: false, // don't load AGENTS.md or CLAUDE.md
+});
+```
+
+## Use Cases
+
+- **Project conventions** — coding style, test requirements, deployment rules
+- **Safety guardrails** — directories the agent should never modify, commands to avoid
+- **Context** — project architecture notes, key dependencies, known issues

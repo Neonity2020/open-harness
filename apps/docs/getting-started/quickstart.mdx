@@ -1,0 +1,162 @@
+---
+title: Quickstart
+description: Build your first AI agent in minutes
+---
+
+This guide walks you through creating a simple agent that can read files and run shell commands.
+
+## Create an Agent
+
+<Steps>
+  <Step title="Set up your project">
+    Create a new project and install dependencies:
+
+    ```bash
+    mkdir my-agent && cd my-agent
+    npm init -y
+    npm install @openharness/core @ai-sdk/openai
+    ```
+
+    Set your API key:
+
+    ```bash
+    export OPENAI_API_KEY=sk-...
+    ```
+  </Step>
+
+  <Step title="Define the agent">
+    Create an `agent.ts` file:
+
+    ```typescript agent.ts
+    import {
+      Agent,
+      createFsTools,
+      createBashTool,
+      NodeFsProvider,
+      NodeShellProvider,
+    } from "@openharness/core";
+    import { openai } from "@ai-sdk/openai";
+
+    const fsTools = createFsTools(new NodeFsProvider());
+    const { bash } = createBashTool(new NodeShellProvider());
+
+    const agent = new Agent({
+      name: "dev",
+      model: openai("gpt-5.4"),
+      systemPrompt: "You are a helpful coding assistant.",
+      tools: { ...fsTools, bash },
+      maxSteps: 20,
+    });
+    ```
+  </Step>
+
+  <Step title="Run the agent">
+    Add a simple loop that streams the agent's output:
+
+    ```typescript agent.ts
+    import type { ModelMessage } from "ai";
+
+    let messages: ModelMessage[] = [];
+
+    for await (const event of agent.run(messages, "What files are in this directory?")) {
+      switch (event.type) {
+        case "text.delta":
+          process.stdout.write(event.text);
+          break;
+        case "tool.start":
+          console.log(`\nCalling ${event.toolName}...`);
+          break;
+        case "done":
+          messages = event.messages;
+          break;
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Add a Session for Multi-Turn Chat
+
+For interactive conversations with automatic compaction and retry, wrap the agent in a `Session`:
+
+```typescript
+import { Session } from "@openharness/core";
+
+const session = new Session({
+  agent,
+  contextWindow: 128_000,
+});
+
+// First turn
+for await (const event of session.send("List all TypeScript files")) {
+  if (event.type === "text.delta") process.stdout.write(event.text);
+}
+
+// Second turn — session remembers the conversation
+for await (const event of session.send("Now refactor the largest one")) {
+  if (event.type === "text.delta") process.stdout.write(event.text);
+}
+```
+
+## Run the Examples
+
+To run the examples, first clone and build the repository:
+
+```bash
+git clone https://github.com/MaxGfeller/open-harness.git
+cd open-harness
+pnpm install && pnpm build
+```
+
+Then pick an example:
+
+<Tabs>
+  <Tab title="CLI">
+    An interactive terminal agent with tool approval prompts and subagent display:
+
+    ```bash
+    pnpm --filter cli-demo start
+    ```
+  </Tab>
+  <Tab title="Next.js">
+    A chat app with streaming, tool visualization, and subagent status:
+
+    ```bash
+    cp examples/nextjs-demo/.env.example examples/nextjs-demo/.env
+    # Edit .env and add your OPENAI_API_KEY
+    pnpm --filter nextjs-demo dev
+    ```
+
+    Then open [http://localhost:3000](http://localhost:3000).
+  </Tab>
+  <Tab title="Nuxt">
+    The same chat experience built with Vue 3 and Nuxt 4:
+
+    ```bash
+    pnpm --filter nuxt-demo dev
+    ```
+
+    Then open [http://localhost:3000](http://localhost:3000).
+  </Tab>
+</Tabs>
+
+<Note>
+  All examples require an `OPENAI_API_KEY`. Create a `.env` file in the repo root:
+  ```bash
+  echo "OPENAI_API_KEY=sk-..." > .env
+  ```
+</Note>
+
+## Next Steps
+
+<Columns cols={3}>
+  <Card title="Agents" icon="robot" href="/core/agents">
+    Learn about the Agent API, events, and configuration options.
+  </Card>
+  <Card title="Sessions" icon="comments" href="/core/sessions">
+    Add compaction, retry, and persistence for multi-turn conversations.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/tools/built-in-tools">
+    Explore built-in tools and learn to create custom ones.
+  </Card>
+</Columns>

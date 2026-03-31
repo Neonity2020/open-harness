@@ -1,0 +1,91 @@
+---
+title: Installation
+description: Install OpenHarness packages in your project
+---
+
+## Install the Core Package
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install @openharness/core
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add @openharness/core
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+    yarn add @openharness/core
+    ```
+  </Tab>
+</Tabs>
+
+## UI Packages (Optional)
+
+If you're building a chat UI, install the framework-specific package:
+
+<Tabs>
+  <Tab title="React">
+    ```bash
+    npm install @openharness/react
+    ```
+  </Tab>
+  <Tab title="Vue">
+    ```bash
+    npm install @openharness/vue
+    ```
+  </Tab>
+</Tabs>
+
+## AI SDK Provider
+
+OpenHarness uses Vercel's AI SDK for model access. Install the provider for your preferred model:
+
+<Tabs>
+  <Tab title="OpenAI">
+    ```bash
+    npm install @ai-sdk/openai
+    ```
+  </Tab>
+  <Tab title="Anthropic">
+    ```bash
+    npm install @ai-sdk/anthropic
+    ```
+  </Tab>
+  <Tab title="Google">
+    ```bash
+    npm install @ai-sdk/google
+    ```
+  </Tab>
+</Tabs>
+
+Any [AI SDK-compatible provider](https://sdk.vercel.ai/providers) works with OpenHarness.
+
+## Environment Variables
+
+Set the API key for your model provider:
+
+```bash
+# OpenAI
+export OPENAI_API_KEY=sk-...
+
+# Anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Google
+export GOOGLE_GENERATIVE_AI_API_KEY=...
+```
+
+## Clone the Repository
+
+To run the examples or contribute:
+
+```bash
+git clone https://github.com/MaxGfeller/open-harness.git
+cd open-harness
+pnpm install
+pnpm build
+```

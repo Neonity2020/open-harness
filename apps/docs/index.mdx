@@ -1,0 +1,56 @@
+---
+title: Introduction
+description: Build capable, general-purpose AI agents in code
+---
+
+OpenHarness is an open-source framework for building general-purpose AI agents programmatically. Built on [Vercel's AI SDK](https://sdk.vercel.ai), it provides the building blocks inspired by Claude Code, Codex, and similar advanced agent harnesses — but in a lightweight, composable form you can use in your own applications.
+
+## Why OpenHarness?
+
+Agent harnesses like Claude Code, Codex, and OpenCode are powerful general-purpose agents. While their creators offer SDKs (Claude Agent SDK, Codex App Server, etc.), these are heavy to use programmatically.
+
+OpenHarness gives you the same building blocks — multi-step tool loops, subagent delegation, context compaction, streaming UI integration — as composable primitives you control entirely in code.
+
+## Key Features
+
+<Columns cols={2}>
+  <Card title="Stateless Agents" icon="robot">
+    Agents are pure executors: pass in history, get back events. Full control over conversation state.
+  </Card>
+  <Card title="Composable Middleware" icon="layer-group">
+    Add compaction, retry, persistence, and hooks as independent, composable layers.
+  </Card>
+  <Card title="Subagent Delegation" icon="sitemap">
+    Agents can spawn child agents for subtasks, with configurable nesting depth and background execution.
+  </Card>
+  <Card title="Provider Abstraction" icon="plug">
+    Filesystem and shell access through swappable providers — run locally, in sandboxes, or in the cloud.
+  </Card>
+  <Card title="MCP Integration" icon="server">
+    Connect to Model Context Protocol servers for external tools via stdio, HTTP, or SSE transports.
+  </Card>
+  <Card title="AI SDK 5 UI Streaming" icon="display">
+    Stream agent sessions directly to React or Vue chat UIs with typed data parts.
+  </Card>
+</Columns>
+
+## Quick Example
+
+```typescript
+import { Agent, createFsTools, createBashTool, NodeFsProvider, NodeShellProvider } from "@openharness/core";
+import { openai } from "@ai-sdk/openai";
+
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.4"),
+  tools: {
+    ...createFsTools(new NodeFsProvider()),
+    ...createBashTool(new NodeShellProvider()),
+  },
+  maxSteps: 20,
+});
+
+for await (const event of agent.run([], "Refactor the auth module")) {
+  if (event.type === "text.delta") process.stdout.write(event.text);
+}
+```

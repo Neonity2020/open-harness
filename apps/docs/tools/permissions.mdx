@@ -1,0 +1,63 @@
+---
+title: Permissions
+description: Gate tool execution with an approval callback
+---
+
+By default, all tool calls are allowed. To gate tool execution — for example, prompting a user for confirmation — pass an `approve` callback to the agent.
+
+## Basic Approval
+
+```typescript
+const agent = new Agent({
+  name: "safe-agent",
+  model: openai("gpt-5.4"),
+  tools: { ...fsTools, bash },
+  approve: async ({ toolName, toolCallId, input }) => {
+    // Return true to allow, false to deny
+    const answer = await askUser(`Allow ${toolName}?`);
+    return answer === "yes";
+  },
+});
+```
+
+## ToolCallInfo
+
+The approval callback receives a `ToolCallInfo` object:
+
+```typescript
+interface ToolCallInfo {
+  toolName: string;
+  toolCallId: string;
+  input: unknown;
+}
+```
+
+## Denied Tool Calls
+
+When a tool call is denied, a `ToolDeniedError` is thrown and surfaced to the model as a tool error. This lets the model adjust its approach — for example, by trying a different tool or asking the user for guidance.
+
+## Async Approval
+
+The callback can be async, enabling a variety of approval patterns:
+
+- **Terminal prompts** — ask the user in a CLI
+- **Web UI modals** — show a confirmation dialog
+- **External services** — call an approval API or workflow system
+
+```typescript
+// Example: approve reads automatically, require confirmation for writes
+const agent = new Agent({
+  name: "careful-agent",
+  model: openai("gpt-5.4"),
+  tools: { ...fsTools, bash },
+  approve: async ({ toolName }) => {
+    const readOnly = ["readFile", "listFiles", "grep"];
+    if (readOnly.includes(toolName)) return true;
+    return await promptUser(`Allow ${toolName}?`);
+  },
+});
+```
+
+<Note>
+  Subagents run autonomously without prompting for permission by design. If you need to control subagent tool access, limit the tools you pass to the subagent.
+</Note>

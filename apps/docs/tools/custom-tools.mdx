@@ -1,0 +1,65 @@
+---
+title: Custom Tools
+description: Create your own tools using the AI SDK tool() helper
+---
+
+Any AI SDK-compatible tool works with OpenHarness. Define tools using the `tool()` function from the `ai` package with Zod schemas for input validation.
+
+## Creating a Custom Tool
+
+```typescript
+import { tool } from "ai";
+import { z } from "zod";
+
+const myTool = tool({
+  description: "Do something useful",
+  inputSchema: z.object({ query: z.string() }),
+  execute: async ({ query }) => {
+    return { result: `You asked: ${query}` };
+  },
+});
+
+const agent = new Agent({
+  name: "my-agent",
+  model: openai("gpt-5.4"),
+  tools: { myTool },
+});
+```
+
+## Combining Built-in and Custom Tools
+
+Mix and match built-in tools with your own:
+
+```typescript
+import { createFsTools, createBashTool, NodeFsProvider, NodeShellProvider } from "@openharness/core";
+import { tool } from "ai";
+import { z } from "zod";
+
+const fsTools = createFsTools(new NodeFsProvider());
+const { bash } = createBashTool(new NodeShellProvider());
+
+const deployTool = tool({
+  description: "Deploy the application to production",
+  inputSchema: z.object({
+    environment: z.enum(["staging", "production"]),
+    version: z.string(),
+  }),
+  execute: async ({ environment, version }) => {
+    // your deployment logic
+    return { status: "deployed", environment, version };
+  },
+});
+
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.4"),
+  tools: { ...fsTools, bash, deploy: deployTool },
+});
+```
+
+## Tool Best Practices
+
+- **Clear descriptions** help the model understand when and how to use each tool
+- **Zod schemas** provide both validation and type safety
+- **Return structured data** so the model can reason about results
+- **Handle errors gracefully** — thrown errors are surfaced to the model as tool errors, allowing it to adjust its approach

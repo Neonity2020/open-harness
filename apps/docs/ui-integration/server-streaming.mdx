@@ -1,0 +1,82 @@
+---
+title: Server Streaming
+description: Stream agent sessions to AI SDK 5 chat UIs
+---
+
+OpenHarness integrates with AI SDK 5's data stream protocol, so you can stream agent sessions directly to `useChat`-based React and Vue UIs.
+
+## `toResponse()`
+
+Both `Session` and `Conversation` provide two methods for streaming to the client:
+
+- **`toUIMessageStream(input)`** — returns a `ReadableStream<UIMessageChunk>` that maps session events to AI SDK 5 typed chunks
+- **`toResponse(input, options)`** — wraps the stream in an HTTP `Response` with SSE headers, ready to return from any route handler
+
+## Next.js Example
+
+```typescript app/api/chat/route.ts
+import {
+  Agent, Conversation, toRunner, apply,
+  withTurnTracking, withCompaction, withRetry, withPersistence,
+  extractUserInput, type SessionStore,
+} from "@openharness/core";
+
+const store: SessionStore = {
+  async load(id) { return db.get(id); },
+  async save(id, messages) { await db.set(id, messages); },
+};
+
+const conversations = new Map<string, Conversation>();
+
+function getOrCreateConversation(id?: string): Conversation {
+  const convId = id ?? crypto.randomUUID();
+  let conv = conversations.get(convId);
+  if (!conv) {
+    const runner = apply(
+      toRunner(agent),
+      withTurnTracking(),
+      withCompaction({ contextWindow: 128_000, model: agent.model }),
+      withRetry(),
+      withPersistence({ store, sessionId: convId }),
+    );
+    conv = new Conversation({ runner, sessionId: convId, store });
+    conversations.set(convId, conv);
+  }
+  return conv;
+}
+
+export async function POST(req: Request) {
+  const { id, messages } = await req.json();
+  const conv = getOrCreateConversation(id);
+  const input = await extractUserInput(messages);
+  return conv.toResponse(input, { signal: req.signal });
+}
+```
+
+## Custom Data Parts
+
+The stream emits all standard AI SDK 5 chunk types (`text-delta`, `reasoning-delta`, `tool-input-available`, `tool-output-available`, `start`, `finish`, etc.) plus custom OpenHarness data parts for subagent activity, compaction, retry, and turn lifecycle:
+
+| Data part | Description |
+| --- | --- |
+| `data-oh:subagent.start` | A subagent task was spawned |
+| `data-oh:subagent.done` | A subagent task completed |
+| `data-oh:subagent.error` | A subagent task failed |
+| `data-oh:compaction.start` | Compaction started |
+| `data-oh:compaction.done` | Compaction finished |
+| `data-oh:retry` | Retrying after transient error |
+| `data-oh:turn.start` | Turn started |
+| `data-oh:turn.done` | Turn finished |
+| `data-oh:session.compacting` | Session is compacting |
+
+## Using Data Part Types
+
+If you're building custom UI components that consume the stream directly, the core package exports typed data part types and guards:
+
+```typescript
+import {
+  type OHDataPart,
+  isSubagentEvent,
+  isCompactionEvent,
+} from "@openharness/core";
+```

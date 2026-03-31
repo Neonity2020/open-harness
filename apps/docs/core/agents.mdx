@@ -1,0 +1,125 @@
+---
+title: Agents
+description: The core primitive for building AI agents
+---
+
+The `Agent` class is the core primitive of OpenHarness. An agent wraps a language model, a set of tools, and a multi-step execution loop into a **stateless executor** that you can `run()` with a message history and new input.
+
+## Creating an Agent
+
+```typescript
+import {
+  Agent,
+  createFsTools,
+  createBashTool,
+  NodeFsProvider,
+  NodeShellProvider,
+} from "@openharness/core";
+import { openai } from "@ai-sdk/openai";
+
+const fsTools = createFsTools(new NodeFsProvider());
+const { bash } = createBashTool(new NodeShellProvider());
+
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.4"),
+  systemPrompt: "You are a helpful coding assistant.",
+  tools: { ...fsTools, bash },
+  maxSteps: 20,
+});
+```
+
+## Running an Agent
+
+`agent.run()` is an async generator that takes a message history and new input, and yields a stream of typed events as the agent works. The agent is **stateless** — it doesn't accumulate messages internally. You pass the conversation history in and get the updated history back in the `done` event.
+
+```typescript
+import type { ModelMessage } from "ai";
+
+let messages: ModelMessage[] = [];
+
+for await (const event of agent.run(messages, "Refactor the auth module to use JWTs")) {
+  switch (event.type) {
+    case "text.delta":
+      process.stdout.write(event.text);
+      break;
+    case "tool.start":
+      console.log(`Calling ${event.toolName}...`);
+      break;
+    case "tool.done":
+      console.log(`${event.toolName} finished`);
+      break;
+    case "done":
+      messages = event.messages; // capture updated history for next turn
+      console.log(`Result: ${event.result}, tokens: ${event.totalUsage.totalTokens}`);
+      break;
+  }
+}
+```
+
+This makes it easy to build multi-turn interactions — just pass the messages from the previous `done` event into the next `run()` call. It also means you have full control over the conversation history: you can inspect it, modify it, or share it between agents.
+
+## Events
+
+The full set of events emitted by `run()`:
+
+| Event | Description |
+| --- | --- |
+| `text.delta` | Streamed text chunk from the model |
+| `text.done` | Full text for the current step is complete |
+| `reasoning.delta` | Streamed reasoning/thinking chunk (if the model supports it) |
+| `reasoning.done` | Full reasoning text for the step is complete |
+| `tool.start` | A tool call has been initiated |
+| `tool.done` | A tool call completed successfully |
+| `tool.error` | A tool call failed |
+| `step.start` | A new agentic step is starting |
+| `step.done` | A step completed (includes token usage and finish reason) |
+| `error` | An error occurred during execution |
+| `done` | The agent has finished — `result` is one of `"complete"`, `"stopped"`, `"max_steps"`, or `"error"` |
+
+## Configuration
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `name` | (required) | Agent name, used in logging and subagent selection |
+| `model` | (required) | Any Vercel AI SDK `LanguageModel` |
+| `systemPrompt` | — | System prompt prepended to every request |
+| `tools` | — | AI SDK `ToolSet` — the tools the agent can call |
+| `maxSteps` | `100` | Maximum agentic steps before stopping |
+| `temperature` | — | Sampling temperature |
+| `maxTokens` | — | Max output tokens per step |
+| `instructions` | `true` | Whether to load `AGENTS.md` / `CLAUDE.md` from the project directory |
+| `approve` | — | Callback for [tool call approval](/tools/permissions) |
+| `subagents` | — | Child agents available via the `task` tool (see [Subagents](/advanced/subagents)) |
+| `maxSubagentDepth` | `1` | Maximum nesting depth for subagents |
+| `subagentBackground` | — | Enable [background subagent execution](/advanced/subagents#background-subagents) |
+| `mcpServers` | — | [MCP servers](/advanced/mcp-servers) to connect to |
+| `skills` | — | [Skills](/advanced/skills) configuration |
+
+## Multi-Turn Conversations
+
+Since the agent is stateless, multi-turn is achieved by passing the updated messages back in:
+
+```typescript
+let messages: ModelMessage[] = [];
+
+// Turn 1
+for await (const event of agent.run(messages, "List all files")) {
+  if (event.type === "done") messages = event.messages;
+}
+
+// Turn 2 — agent sees the full history
+for await (const event of agent.run(messages, "Now read the largest file")) {
+  if (event.type === "done") messages = event.messages;
+}
+```
+
+For automatic history management, compaction, and retry, use a [Session](/core/sessions) or [Conversation](/core/middleware#conversation).
+
+## Cleanup
+
+If the agent uses MCP servers or background subagents, call `close()` when done:
+
+```typescript
+await agent.close();
+```

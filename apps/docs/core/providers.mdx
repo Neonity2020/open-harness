@@ -1,0 +1,205 @@
+---
+title: Providers
+description: Swappable filesystem and shell access for any environment
+---
+
+Providers abstract how agents interact with the filesystem and shell. Instead of coupling tool logic to Node.js APIs, OpenHarness defines two interfaces — `FsProvider` and `ShellProvider` — that you can implement for any environment.
+
+This lets you run the same agent code locally, in a sandbox, or in the cloud, just by swapping the provider.
+
+## Interfaces
+
+### FsProvider
+
+```typescript
+interface FsProvider {
+  readFile(path: string): Promise<string>;
+  writeFile(path: string, content: string): Promise<void>;
+  exists(path: string): Promise<boolean>;
+  stat(path: string): Promise<FileStat>;
+  readdir(path: string): Promise<DirEntry[]>;
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  remove(path: string, options?: { recursive?: boolean }): Promise<void>;
+  rename(oldPath: string, newPath: string): Promise<void>;
+  resolvePath(path: string): string;
+}
+```
+
+### ShellProvider
+
+```typescript
+interface ShellProvider {
+  exec(
+    command: string,
+    options?: {
+      timeout?: number;
+      cwd?: string;
+      env?: Record<string, string>;
+    }
+  ): Promise<ShellResult>;
+}
+```
+
+### Environment
+
+The `Environment` type combines both providers:
+
+```typescript
+interface Environment {
+  fs: FsProvider;
+  shell: ShellProvider;
+}
+```
+
+## Built-in Providers
+
+### NodeFsProvider
+
+The default filesystem provider for Node.js environments. Uses `node:fs` under the hood.
+
+```typescript
+import { createFsTools, NodeFsProvider } from "@openharness/core";
+
+const fsTools = createFsTools(new NodeFsProvider());
+```
+
+**Options:**
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `cwd` | `process.cwd()` | Working directory for resolving relative paths |
+| `maxFileSize` | `10 MB` | Maximum file size `readFile` will load |
+
+```typescript
+const fs = new NodeFsProvider({
+  cwd: "/home/user/project",
+  maxFileSize: 20 * 1024 * 1024, // 20 MB
+});
+```
+
+Safety features:
+- **File size guard** — throws `FileTooLargeError` if a file exceeds `maxFileSize`
+- **Auto-mkdir** — `writeFile` creates parent directories automatically
+- **Path resolution** — relative paths are resolved from `cwd`
+
+### NodeShellProvider
+
+The default shell provider for Node.js. Runs commands via `bash -c`.
+
+```typescript
+import { createBashTool, NodeShellProvider } from "@openharness/core";
+
+const { bash } = createBashTool(new NodeShellProvider());
+```
+
+**Options:**
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `cwd` | `process.cwd()` | Default working directory for commands |
+| `maxStdout` | `50,000` chars | Truncate stdout beyond this length |
+| `maxStderr` | `10,000` chars | Truncate stderr beyond this length |
+
+```typescript
+const shell = new NodeShellProvider({
+  cwd: "/home/user/project",
+  maxStdout: 100_000,
+});
+```
+
+The `exec` method supports per-call `timeout` (default 30s), `cwd`, and `env` overrides.
+
+### VfsFsProvider
+
+A virtual filesystem provider from the `@openharness/provider-vfs` package. Provides sandboxed, in-memory, or SQLite-backed file access — ideal for testing, isolated execution, or environments without a real filesystem.
+
+```bash
+npm install @openharness/provider-vfs
+```
+
+```typescript
+import { createFsTools } from "@openharness/core";
+import { VfsFsProvider } from "@openharness/provider-vfs";
+
+const fsTools = createFsTools(new VfsFsProvider());
+```
+
+By default, VfsFsProvider uses an in-memory backend mounted at `/workspace`. It initializes lazily on first use.
+
+**Options:**
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `vfs` | — | Pre-created `VirtualFileSystem` instance (skips auto-creation) |
+| `provider` | `MemoryProvider` | VFS storage backend |
+| `vfsOptions` | `{ moduleHooks: false, virtualCwd: true }` | Options passed to `vfs.create()` |
+| `mountPoint` | `"/workspace"` | Mount point for the virtual filesystem |
+| `maxFileSize` | `10 MB` | Maximum file size `readFile` will load |
+
+#### Storage Backends
+
+The VFS provider supports three backends via `@platformatic/vfs` (or the future `node:vfs`):
+
+<Tabs>
+  <Tab title="Memory (default)">
+    In-memory filesystem — fast, ephemeral, no persistence:
+
+    ```typescript
+    const fs = new VfsFsProvider(); // MemoryProvider is the default
+    ```
+  </Tab>
+  <Tab title="SQLite">
+    SQLite-backed filesystem — persistent, supports larger datasets:
+
+    ```typescript
+    import { getVfsModule } from "@openharness/provider-vfs";
+
+    const vfsModule = await getVfsModule();
+    const fs = new VfsFsProvider({
+      provider: new vfsModule.SqliteProvider("./agent-fs.db"),
+    });
+    ```
+  </Tab>
+  <Tab title="Real FS">
+    Real filesystem scoped to a root directory — sandboxed access to a real path:
+
+    ```typescript
+    import { getVfsModule } from "@openharness/provider-vfs";
+
+    const vfsModule = await getVfsModule();
+    const fs = new VfsFsProvider({
+      provider: new vfsModule.RealFSProvider("/path/to/sandbox"),
+    });
+    ```
+  </Tab>
+</Tabs>
+
+#### Accessing the VFS Instance
+
+For advanced use cases, you can access the underlying `VirtualFileSystem`:
+
+```typescript
+const provider = new VfsFsProvider();
+const vfs = await provider.getVfs();
+```
+
+## Custom Providers
+
+Implement the `FsProvider` and/or `ShellProvider` interfaces to support any environment:
+
+```typescript
+import type { FsProvider, ShellProvider } from "@openharness/core";
+
+class MyCloudFsProvider implements FsProvider {
+  async readFile(path: string) { /* ... */ }
+  async writeFile(path: string, content: string) { /* ... */ }
+  // ... implement all methods
+}
+```
+
+Possible targets:
+- **E2B sandboxes** for isolated code execution
+- **Cloudflare Workers** for edge deployment
+- **Daytona** for managed dev environments
+- **Docker containers** for reproducible builds
+- **Custom APIs** wrapping remote filesystems

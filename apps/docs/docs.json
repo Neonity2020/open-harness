@@ -1,0 +1,105 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "OpenHarness",
+  "colors": {
+    "primary": "#8B5CF6",
+    "light": "#A78BFA",
+    "dark": "#7C3AED"
+  },
+  "appearance": {
+    "default": "dark"
+  },
+  "fonts": {
+    "heading": {
+      "family": "Instrument Serif",
+      "source": "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap",
+      "format": "woff2"
+    }
+  },
+  "styling": {
+    "codeblocks": "dark"
+  },
+  "background": {
+    "decoration": "gradient"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "favicon": "/favicon.svg",
+  "navbar": {
+    "links": [
+      {
+        "label": "Website",
+        "href": "https://open-harness.dev"
+      },
+      {
+        "label": "GitHub",
+        "href": "https://github.com/MaxGfeller/open-harness"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/MaxGfeller/open-harness"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "index",
+              "getting-started/installation",
+              "getting-started/quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core/agents",
+              "core/sessions",
+              "core/middleware",
+              "core/providers"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
+              "tools/built-in-tools",
+              "tools/custom-tools",
+              "tools/permissions"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/subagents",
+              "advanced/mcp-servers",
+              "advanced/skills",
+              "advanced/agents-md"
+            ]
+          },
+          {
+            "group": "UI Integration",
+            "pages": [
+              "ui-integration/server-streaming",
+              "ui-integration/react",
+              "ui-integration/vue"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "examples"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

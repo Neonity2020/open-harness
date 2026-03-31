@@ -1,0 +1,55 @@
+---
+title: MCP Servers
+description: Connect to Model Context Protocol servers for external tools
+---
+
+Agents can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers. Tools from MCP servers are merged into the agent's toolset alongside any static tools.
+
+## Configuration
+
+```typescript
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.4"),
+  tools: { ...fsTools, bash },
+  mcpServers: {
+    github: {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-github"],
+      env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN },
+    },
+    weather: {
+      type: "http",
+      url: "https://weather-mcp.example.com/mcp",
+      headers: { Authorization: "Bearer ..." },
+    },
+  },
+});
+
+// MCP connections are established lazily on first run()
+for await (const event of agent.run([], "What PRs are open?")) {
+  // ...
+}
+
+// Clean up MCP connections when done
+await agent.close();
+```
+
+## Transport Types
+
+Three transport types are supported:
+
+| Transport | Use case |
+| --- | --- |
+| `stdio` | Local servers — spawns a child process, communicates over stdin/stdout |
+| `http` | Remote servers via Streamable HTTP (recommended for production) |
+| `sse` | Remote servers via Server-Sent Events (legacy) |
+
+## Tool Namespacing
+
+When multiple MCP servers are configured, tools are namespaced as `serverName_toolName` to avoid collisions. With a single server, tool names are used as-is.
+
+## Lazy Connection
+
+MCP connections are established lazily on the first `run()` call and cached for the agent's lifetime. This follows the same pattern as skills discovery. Always call `agent.close()` when done to clean up connections.

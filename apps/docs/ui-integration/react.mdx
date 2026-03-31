@@ -1,0 +1,139 @@
+---
+title: React
+description: React hooks and provider for AI SDK 5 chat UIs
+---
+
+The `@openharness/react` package provides hooks that wire into AI SDK 5's `useChat` and track OpenHarness-specific state like subagent activity, compaction, and turn lifecycle.
+
+## Setup
+
+```bash
+npm install @openharness/react
+```
+
+Wrap your app (or chat component) with `OpenHarnessProvider`:
+
+```tsx
+import { OpenHarnessProvider } from "@openharness/react";
+
+function App() {
+  return (
+    <OpenHarnessProvider>
+      <Chat />
+    </OpenHarnessProvider>
+  );
+}
+```
+
+## `useOpenHarness`
+
+Creates a chat session connected to your API endpoint. Returns the same interface as AI SDK 5's `useChat` (`messages`, `sendMessage`, `status`, `stop`, etc.), typed with `OHUIMessage`:
+
+```tsx
+import { useOpenHarness } from "@openharness/react";
+
+function Chat() {
+  const { messages, sendMessage, status, stop } = useOpenHarness({
+    endpoint: "/api/chat",
+  });
+
+  return (
+    <div>
+      {messages.map((msg) => (
+        <div key={msg.id}>
+          {msg.parts.map((part, i) =>
+            part.type === "text" ? <span key={i}>{part.text}</span> : null
+          )}
+        </div>
+      ))}
+      <button onClick={() => sendMessage({ text: "Hello" })}>Send</button>
+    </div>
+  );
+}
+```
+
+## `useSubagentStatus`
+
+Derives reactive state from `data-oh:subagent.*` events:
+
+```tsx
+import { useSubagentStatus } from "@openharness/react";
+
+function SubagentDisplay() {
+  const { activeSubagents, recentSubagents, hasActiveSubagents } = useSubagentStatus();
+
+  if (!hasActiveSubagents) return null;
+
+  return (
+    <div>
+      {activeSubagents.map((agent) => (
+        <div key={agent.path.join("/")}>
+          {agent.name}: {agent.task}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+- **`activeSubagents`** — currently running subagents
+- **`recentSubagents`** — all subagents seen in this session
+- **`hasActiveSubagents`** — boolean shorthand
+
+## `useSessionStatus`
+
+Tracks turn index, compaction state, and retry info from `data-oh:*` events:
+
+```tsx
+import { useSessionStatus } from "@openharness/react";
+
+function SessionInfo() {
+  const session = useSessionStatus();
+
+  return (
+    <div>
+      Turn: {session.turnIndex} | Messages: {session.messageCount}
+    </div>
+  );
+}
+```
+
+## Full Example
+
+```tsx
+import {
+  OpenHarnessProvider,
+  useOpenHarness,
+  useSubagentStatus,
+  useSessionStatus,
+} from "@openharness/react";
+
+function App() {
+  return (
+    <OpenHarnessProvider>
+      <Chat />
+    </OpenHarnessProvider>
+  );
+}
+
+function Chat() {
+  const { messages, sendMessage, status, stop } = useOpenHarness({
+    endpoint: "/api/chat",
+  });
+  const { activeSubagents, hasActiveSubagents } = useSubagentStatus();
+  const session = useSessionStatus();
+
+  return (
+    <div>
+      {messages.map((msg) => (
+        <div key={msg.id}>
+          {msg.parts.map((part, i) =>
+            part.type === "text" ? <span key={i}>{part.text}</span> : null
+          )}
+        </div>
+      ))}
+      <button onClick={() => sendMessage({ text: "Hello" })}>Send</button>
+    </div>
+  );
+}
+```

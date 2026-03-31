@@ -1,0 +1,110 @@
+---
+title: Built-in Tools
+description: Filesystem, shell, and other tools that ship with OpenHarness
+---
+
+Tools use the Vercel AI SDK `tool()` helper with Zod schemas. OpenHarness ships a set of built-in tools that you can use as-is, compose, or replace entirely.
+
+## Filesystem Tools
+
+Create filesystem tools by passing a provider to the factory function:
+
+```typescript
+import { createFsTools, NodeFsProvider } from "@openharness/core";
+
+const fsTools = createFsTools(new NodeFsProvider());
+```
+
+This returns the following tools:
+
+| Tool | Description |
+| --- | --- |
+| `readFile` | Read file contents (supports line offset/limit for large files) |
+| `writeFile` | Write content to a file (creates parent directories automatically) |
+| `editFile` | Find-and-replace within a file |
+| `listFiles` | List files and directories (optionally recursive) |
+| `grep` | Regex search across files (automatically skips `node_modules`, `.git`) |
+| `deleteFile` | Delete a file or directory |
+
+## Bash Tool
+
+The bash tool runs arbitrary shell commands via `bash -c`:
+
+```typescript
+import { createBashTool, NodeShellProvider } from "@openharness/core";
+
+const { bash } = createBashTool(new NodeShellProvider());
+```
+
+Features:
+- Configurable timeout (default 30s, max 5min)
+- Automatic output truncation for large results
+- Captures both stdout and stderr with exit code
+
+## Using Tools with an Agent
+
+Pass tools directly to the agent constructor:
+
+```typescript
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.4"),
+  tools: { ...fsTools, bash },
+});
+```
+
+You can selectively include tools — for example, a read-only agent:
+
+```typescript
+const readOnlyAgent = new Agent({
+  name: "explore",
+  model: openai("gpt-5.4"),
+  tools: {
+    readFile: fsTools.readFile,
+    listFiles: fsTools.listFiles,
+    grep: fsTools.grep,
+  },
+});
+```
+
+## Providers
+
+The provider interface decouples tool logic from the runtime environment. The built-in `NodeFsProvider` and `NodeShellProvider` work in Node.js, but you can implement the interfaces for other environments:
+
+- **Virtual filesystems** for testing
+- **E2B sandboxes** for isolated execution
+- **Cloudflare Workers** for edge deployment
+- **Daytona** for managed dev environments
+
+### FsProvider Interface
+
+```typescript
+interface FsProvider {
+  readFile(path: string): Promise<string>;
+  writeFile(path: string, content: string): Promise<void>;
+  exists(path: string): Promise<boolean>;
+  stat(path: string): Promise<FileStat>;
+  readdir(path: string): Promise<DirEntry[]>;
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  remove(path: string, options?: { recursive?: boolean }): Promise<void>;
+  rename(oldPath: string, newPath: string): Promise<void>;
+  resolvePath(path: string): string;
+}
+```
+
+### ShellProvider Interface
+
+```typescript
+interface ShellProvider {
+  exec(
+    command: string,
+    options?: {
+      timeout?: number;
+      cwd?: string;
+      env?: Record<string, string>;
+    }
+  ): Promise<ShellResult>;
+}
+```
+
+The built-in `NodeFsProvider` includes safety guards like file size limits and binary file detection. `NodeShellProvider` captures exit code, stdout, and stderr with output size limits.

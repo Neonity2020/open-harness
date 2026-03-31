@@ -1,0 +1,142 @@
+---
+title: Vue
+description: Vue 3 composables and provider for AI SDK 5 chat UIs
+---
+
+The `@openharness/vue` package provides the same functionality as the React package, using Vue 3 composables and Nuxt-compatible components.
+
+## Setup
+
+```bash
+npm install @openharness/vue
+```
+
+Wrap your app with the `OpenHarnessProvider` component:
+
+```vue
+<script setup lang="ts">
+import { OpenHarnessProvider } from "@openharness/vue";
+</script>
+
+<template>
+  <OpenHarnessProvider>
+    <Chat />
+  </OpenHarnessProvider>
+</template>
+```
+
+## `useOpenHarness`
+
+Creates a chat session connected to your API endpoint. Returns an AI SDK 5 `Chat` instance with reactive properties (`messages`, `status`, `sendMessage`, `stop`, etc.), typed with `OHUIMessage`:
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import { useOpenHarness } from "@openharness/vue";
+
+const chat = useOpenHarness({ endpoint: "/api/chat" });
+const input = ref("");
+
+function send() {
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  chat.sendMessage({ text });
+}
+</script>
+
+<template>
+  <div>
+    <div v-for="msg in chat.messages" :key="msg.id">
+      <template v-for="(part, i) in msg.parts" :key="i">
+        <span v-if="part.type === 'text'">{{ part.text }}</span>
+      </template>
+    </div>
+    <form @submit.prevent="send">
+      <input v-model="input" placeholder="Type a message..." />
+      <button type="submit">Send</button>
+    </form>
+  </div>
+</template>
+```
+
+## `useSubagentStatus`
+
+Returns a computed ref deriving reactive state from `data-oh:subagent.*` events:
+
+```vue
+<script setup lang="ts">
+import { useSubagentStatus } from "@openharness/vue";
+
+const subagent = useSubagentStatus();
+</script>
+
+<template>
+  <div v-if="subagent.hasActiveSubagents">
+    <div v-for="agent in subagent.activeSubagents" :key="agent.path.join('/')">
+      {{ agent.name }}: {{ agent.task }}
+    </div>
+  </div>
+</template>
+```
+
+## `useSessionStatus`
+
+Returns a computed ref tracking turn index, compaction state, and retry info:
+
+```vue
+<script setup lang="ts">
+import { useSessionStatus } from "@openharness/vue";
+
+const session = useSessionStatus();
+</script>
+
+<template>
+  <div>Turn: {{ session.turnIndex }}</div>
+</template>
+```
+
+## Full Example
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import {
+  useOpenHarness,
+  useSubagentStatus,
+  useSessionStatus,
+} from "@openharness/vue";
+
+const chat = useOpenHarness({ endpoint: "/api/chat" });
+const subagent = useSubagentStatus();
+const session = useSessionStatus();
+const input = ref("");
+
+function send() {
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  chat.sendMessage({ text });
+}
+</script>
+
+<template>
+  <OpenHarnessProvider>
+    <div>
+      <div v-for="msg in chat.messages" :key="msg.id">
+        <template v-for="(part, i) in msg.parts" :key="i">
+          <span v-if="part.type === 'text'">{{ part.text }}</span>
+        </template>
+      </div>
+      <form @submit.prevent="send">
+        <input v-model="input" placeholder="Type a message..." />
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  </OpenHarnessProvider>
+</template>
+```
+
+<Note>
+  The `OpenHarnessProvider` is a renderless wrapper component that provides shared subagent, session, and sandbox state via Vue's `provide`/`inject`.
+</Note>

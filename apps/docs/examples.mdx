@@ -1,0 +1,77 @@
+---
+title: Examples
+description: Example applications built with OpenHarness
+---
+
+OpenHarness ships with three example applications that demonstrate different integration patterns.
+
+## CLI Agent
+
+An interactive terminal agent with tool approval prompts, subagent display, and composed middleware.
+
+```bash
+pnpm --filter cli-demo start
+```
+
+**Features:**
+- Tool approval prompts with queued display
+- Subagent status with spinners
+- Message compaction
+- Composed middleware stack
+
+**Source:** [`examples/cli`](https://github.com/MaxGfeller/open-harness/tree/main/examples/cli)
+
+## Next.js Chat App
+
+A full chat UI built with Next.js and `@openharness/react`.
+
+```bash
+cp examples/nextjs-demo/.env.example examples/nextjs-demo/.env
+# Edit .env and add your OPENAI_API_KEY
+pnpm --filter nextjs-demo dev
+```
+
+Then open [http://localhost:3000](http://localhost:3000).
+
+**Features:**
+- Streaming text and tool visualization
+- Subagent status tracking
+- `announce` tool for agent narration
+- Session persistence (in-memory)
+- Composed middleware (turn tracking, compaction, retry, persistence)
+
+**Source:** [`examples/nextjs-demo`](https://github.com/MaxGfeller/open-harness/tree/main/examples/nextjs-demo)
+
+## Nuxt Chat App
+
+The same chat experience built with Vue 3, Nuxt 4, and `@openharness/vue`.
+
+```bash
+pnpm --filter nuxt-demo dev
+```
+
+Then open [http://localhost:3000](http://localhost:3000).
+
+**Features:**
+- Same capabilities as the Next.js example
+- Vue 3 composables and reactive state
+- Nuxt 4 server routes
+
+**Source:** [`examples/nuxt-demo`](https://github.com/MaxGfeller/open-harness/tree/main/examples/nuxt-demo)
+
+## Prerequisites
+
+All examples require an `OPENAI_API_KEY`. Create a `.env` file in the repo root:
+
+```bash
+echo "OPENAI_API_KEY=sk-..." > .env
+```
+
+Clone and build the repository first:
+
+```bash
+git clone https://github.com/MaxGfeller/open-harness.git
+cd open-harness
+pnpm install
+pnpm build
+```
