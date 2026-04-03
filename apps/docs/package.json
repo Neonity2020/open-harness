@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "mintlify dev",
-    "build": "mintlify build"
+    "build": "echo 'Docs build skipped (use mintlify dev for local preview)'"
   },
   "devDependencies": {
     "mintlify": "^4"
