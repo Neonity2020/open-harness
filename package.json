@@ -3,7 +3,8 @@
   "scripts": {
     "build": "pnpm -r build",
     "changeset": "changeset",
-    "release:publish": "pnpm test && pnpm --filter './packages/*' -r build && changeset publish",
+    "release:github": "node scripts/release/push-and-release.mjs",
+    "release:publish": "node scripts/release/publish-and-release.mjs",
     "release:status": "changeset status",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",

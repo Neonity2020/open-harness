@@ -1,6 +1,6 @@
 # Releasing OpenHarness
 
-OpenHarness uses [Changesets](https://github.com/changesets/changesets) for package versioning and changelog generation. Public packages are published locally to npm, while GitHub Releases are created automatically after the resulting package tags are pushed.
+OpenHarness uses [Changesets](https://github.com/changesets/changesets) for package versioning and changelog generation. Public packages are published locally to npm, and the same local release command pushes the release commit and tags and creates or updates the matching GitHub Releases.
 
 ## Published Packages
 
@@ -54,11 +54,20 @@ Run releases from a clean `main` checkout.
    git commit -m "Release packages"
    ```
 
-5. Publish the new package versions locally:
+5. Publish the new package versions locally and finalize the GitHub release:
 
    ```bash
    pnpm release:publish
    ```
+
+   This command:
+
+   - runs the test suite
+   - builds the public packages
+   - runs `changeset publish`
+   - pushes the current branch and any new release tags to `origin`
+   - creates or updates the GitHub Releases for the tags that point at `HEAD`
+   - requires a clean worktree and an authenticated `gh` session
 
    If npm prompts for an OTP, complete it in the terminal. You can also pass one explicitly:
 
@@ -66,19 +75,27 @@ Run releases from a clean `main` checkout.
    pnpm release:publish -- --otp <code>
    ```
 
-6. Push the release commit and tags:
+   If npm publish succeeds but GitHub release creation fails, fix the issue and rerun:
 
    ```bash
-   git push origin main --follow-tags
+   pnpm release:github
    ```
 
-Once the tags reach GitHub, the `GitHub Releases` workflow creates one GitHub Release per published package tag using the corresponding `CHANGELOG.md` entry.
+   `pnpm release:github` only pushes the current branch and tags and then creates or updates the matching GitHub Releases for the release tags on `HEAD`.
+
+   To backfill releases for tags that are already on GitHub from an older release commit, pass them explicitly:
+
+   ```bash
+   pnpm release:github -- @openharness/core@0.5.3 @openharness/react@0.2.6
+   ```
+
+6. Verify the releases in GitHub after the command completes.
 
 ## Claude Slash Commands
 
 The repo includes project-local Claude skills under `.claude/skills/`. They show up as slash commands in Claude Code:
 
 - `/changeset` drafts a `.changeset/*.md` file for the current branch.
-- `/release-local` walks the maintainer through the local version and publish flow.
+- `/release-local` walks the maintainer through the local version, publish, push, and GitHub release flow.
 
 These commands are repo-specific. They know which workspaces are publishable and which ones should be ignored.
