@@ -3,7 +3,7 @@ title: Subagents
 description: Delegate work to specialized child agents
 ---
 
-Agents can delegate work to other agents. When you pass a `subagents` array, a `task` tool is automatically generated that lets the parent agent spawn child agents by name.
+Agents can delegate work to other agents. When you pass a `subagents` source, OpenHarness auto-registers a `task` tool that lets the parent spawn child agents by name.
 
 ## Basic Setup
 
@@ -24,15 +24,48 @@ const agent = new Agent({
 });
 ```
 
-The parent model sees a `task` tool with a description listing the available subagents and their descriptions. It can call `task` with an `agent` name and a `prompt`, and the subagent runs to completion autonomously.
+The parent model sees a `task` tool listing the available subagents. It can call `task` with an `agent` name and a `prompt`, and the child runs to completion autonomously.
 
 ## Key Behaviors
 
-- **Fresh instance per task** — each `task` call creates a new agent with no shared conversation state
+- **Stateless by default** — each `task` call creates a fresh subagent instance with no shared conversation state
 - **No approval** — subagents run autonomously without prompting for permission
 - **Configurable nesting** — by default subagents cannot themselves have subagents (`maxSubagentDepth: 1`). Set a higher depth to enable nested delegation.
 - **Abort propagation** — the parent's abort signal is forwarded to the child
 - **Concurrent execution** — the model can call `task` multiple times in one response to run subagents in parallel
+
+Existing behavior stays the same unless you explicitly opt into `subagentSessions`.
+
+## Dynamic Catalogs
+
+`subagents` can be either a static `Agent[]` or a dynamic catalog:
+
+```typescript
+import type { SubagentCatalog } from "@openharness/core";
+
+const catalog: SubagentCatalog = {
+  async list() {
+    return [
+      { name: "explore", description: "Read-only repo exploration" },
+      { name: "researcher", description: "Long-form investigation" },
+    ];
+  },
+  async resolve(name) {
+    if (name === "explore") return explore;
+    if (name === "researcher") return researcher;
+    return undefined;
+  },
+};
+
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.4"),
+  tools: { ...fsTools, bash },
+  subagents: catalog,
+});
+```
+
+The catalog is listed at run time, so the `task` tool schema and description stay in sync with whatever agents are currently available.
 
 ## Nested Subagents
 
@@ -63,7 +96,84 @@ const agent = new Agent({
 });
 ```
 
-The depth decrements at each level: the root agent has depth 2, its child `explore` gets depth 1 (can use `search`), and `search` gets depth 0 (no further delegation).
+The depth decrements at each level: the root agent has depth 2, its child `explore` gets depth 1, and `search` gets depth 0.
+
+## Resumable Subagent Sessions
+
+To let subagents keep their own message history across multiple `task` calls, enable `subagentSessions`. This layers `Session` persistence on top of the built-in `task` tool while keeping `Agent` itself stateless.
+
+```typescript
+const messageStore = new Map<string, ModelMessage[]>();
+const metadataStore = new Map<string, SubagentSessionMetadata>();
+
+const agent = new Agent({
+  name: "dev",
+  model: openai("gpt-5.4"),
+  tools: { ...fsTools, bash },
+  subagents: [researcher],
+  subagentSessions: {
+    messages: {
+      async load(id) { return messageStore.get(id); },
+      async save(id, messages) { messageStore.set(id, messages); },
+    },
+    metadata: {
+      async load(id) { return metadataStore.get(id); },
+      async save(meta) { metadataStore.set(meta.sessionId, meta); },
+    },
+    defaultMode: "stateless",
+  },
+});
+```
+
+With `subagentSessions` enabled, `task` accepts an optional `session` object:
+
+```typescript
+task({
+  agent: "researcher",
+  prompt: "Find auth entrypoints",
+  session: { mode: "new" },
+});
+
+task({
+  agent: "researcher",
+  prompt: "What did you find earlier?",
+  session: { mode: "resume", id: "sub-123" },
+});
+
+task({
+  agent: "researcher",
+  prompt: "Explore the alternative fix",
+  session: { mode: "fork", id: "sub-123" },
+});
+```
+
+### Session Modes
+
+| Mode | Behavior |
+| --- | --- |
+| `stateless` | Current behavior. Fresh child agent, no saved history. |
+| `new` | Create a new persistent subagent session and return its `session_id`. |
+| `resume` | Load an existing session by ID and continue from its saved history. |
+| `fork` | Clone an existing session into a new `session_id`, then continue from there. |
+
+### Configuration
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `messages` | (required) | `SessionStore` used to save and load subagent messages |
+| `metadata` | in-memory | Tracks `sessionId -> agentName` and timestamps |
+| `defaultMode` | `stateless` | Default mode when `task(..., session)` is omitted. Only `stateless` and `new` are valid defaults. |
+| `sessionOptions` | — | Extra `Session` options to apply to child sessions (compaction, retry, hooks, etc.) |
+
+When a task runs in `new`, `resume`, or `fork`, the tool result includes `session_id="..."`:
+
+```xml
+<task_result session_id="sub-123">
+  ...
+</task_result>
+```
+
+Subagent sessions are single-writer. If the same `sessionId` is already running, the next `resume` or `fork` attempt fails instead of interleaving histories.
 
 ## Live Subagent Events
 
@@ -76,7 +186,6 @@ const agent = new Agent({
   tools: { ...fsTools, bash },
   subagents: [explore],
   onSubagentEvent: (path, event) => {
-    // path is the ancestry chain, e.g. ["explore"] or ["explore", "search"]
     if (event.type === "tool.done") {
       console.log(`[${path.join(" > ")}] ${event.toolName} completed`);
     }
@@ -84,11 +193,11 @@ const agent = new Agent({
 });
 ```
 
-The `path` parameter is a `string[]` representing the full ancestry from outermost to innermost agent. Events from nested subagents automatically bubble up through the chain. The callback receives the same `AgentEvent` types as the parent's `run()` generator.
+The `path` parameter is a `string[]` representing the full ancestry from outermost to innermost agent. Events from nested subagents automatically bubble up through the chain.
 
 ## Background Subagents
 
-By default, all subagent calls are synchronous — the parent blocks until the child finishes. Enable `subagentBackground` to let the parent spawn agents in the background, do other work, and collect results later. This works like JavaScript's `Promise` combinators.
+By default, all subagent calls are synchronous. Enable `subagentBackground` to let the parent spawn subagents in the background, do other work, and collect results later.
 
 ```typescript
 const agent = new Agent({
@@ -96,38 +205,37 @@ const agent = new Agent({
   model: openai("gpt-5.4"),
   tools: { ...fsTools, bash },
   subagents: [explore, researcher, coder],
-  subagentBackground: true, // enable with defaults
+  subagentBackground: true,
 });
 ```
 
-When enabled, three things happen:
+When enabled:
 
-1. The `task` tool gains an optional `background` parameter. When `true`, the agent is spawned in the background and the tool returns immediately with an agent ID.
-2. An `agent_await` tool is registered for waiting on background agents using different strategies.
-3. `agent_status` and `agent_cancel` tools are registered for checking on and cancelling background agents.
+1. `task` gains an optional `background` parameter. When `true`, the subagent is spawned in the background and the tool returns immediately with a run ID.
+2. `agent_await` is registered for waiting on background runs using different strategies.
+3. `agent_status` and `agent_cancel` are registered for checking and cancelling runs.
 
-The model orchestrates everything naturally through tool calls:
+Example:
 
+```text
+task({ agent: "researcher", prompt: "Find deprecated APIs", background: true })
+task({ agent: "coder", prompt: "Refactor config parser" })
+agent_await({ ids: ["bg-1"], mode: "all" })
 ```
-// Model spawns two background agents and one foreground agent in one step:
-task({ agent: "researcher", prompt: "Find deprecated APIs", background: true })  -> "bg-1"
-task({ agent: "researcher", prompt: "Check test coverage", background: true })   -> "bg-2"
-task({ agent: "coder", prompt: "Refactor config parser", background: false })    -> (blocks)
 
-// Next step — model has the coder result, now collects background results:
-agent_await({ ids: ["bg-1", "bg-2"], mode: "all" })  -> both results
-```
+If resumable sessions are enabled, background spawns keep the same split:
+
+- **run ID** — returned as `agent_id="bg-1"` and used with `agent_status`, `agent_await`, and `agent_cancel`
+- **session ID** — returned as `session_id="sub-123"` and used with later `task(..., session: { mode: "resume", id: "sub-123" })`
 
 ### Await Modes
 
-The `agent_await` tool supports four modes, matching JavaScript's `Promise` combinators:
-
 | Mode | Behavior |
 | --- | --- |
-| `all` | Wait for all agents to succeed. Fails fast if any agent fails. |
-| `allSettled` | Wait for all agents to finish. Returns results and errors. |
-| `any` | Wait for the first agent to succeed. Only fails if all agents fail. |
-| `race` | Wait for the first agent to settle (succeed or fail). |
+| `all` | Wait for all runs to succeed. Fails fast if any run fails. |
+| `allSettled` | Wait for all runs to finish. Returns results and errors. |
+| `any` | Wait for the first run to succeed. Only fails if all runs fail. |
+| `race` | Wait for the first run to settle (succeed or fail). |
 
 ### Configuration
 
@@ -140,13 +248,13 @@ const agent = new Agent({
   tools: { ...fsTools, bash },
   subagents: [explore, researcher],
   subagentBackground: {
-    maxConcurrent: 3,           // max simultaneous background agents (default: Infinity)
-    timeout: 120_000,           // auto-cancel after 2 minutes (default: none)
-    autoCancel: true,           // cancel background agents on agent.close() (default: true)
+    maxConcurrent: 3,
+    timeout: 120_000,
+    autoCancel: true,
     tools: {
-      status: true,             // register agent_status tool (default: true)
-      cancel: true,             // register agent_cancel tool (default: true)
-      await: ["all", "race"],   // which await modes to expose (default: all four)
+      status: true,
+      cancel: true,
+      await: ["all", "race"],
     },
   },
 });
@@ -154,23 +262,13 @@ const agent = new Agent({
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `maxConcurrent` | `Infinity` | Maximum number of background agents running simultaneously |
-| `timeout` | — | Auto-cancel background agents after this many milliseconds |
-| `autoCancel` | `true` | Cancel all running background agents when `agent.close()` is called |
+| `maxConcurrent` | `Infinity` | Maximum number of background runs running simultaneously |
+| `timeout` | — | Auto-cancel background runs after this many milliseconds |
+| `autoCancel` | `true` | Cancel all running background runs when `agent.close()` is called |
 | `tools.status` | `true` | Register the `agent_status` tool |
 | `tools.cancel` | `true` | Register the `agent_cancel` tool |
 | `tools.await` | all four modes | Which await modes to expose (`true` = all, `false` = disable, or an array) |
 
-### Lifecycle Tools
-
-When `subagentBackground` is enabled, these tools are auto-registered alongside the `task` tool:
-
-| Tool | Description |
-| --- | --- |
-| `agent_status` | Non-blocking status check. Returns the agent's current status (`running`, `done`, `failed`, `cancelled`) and result if available. |
-| `agent_cancel` | Cancel a running background agent via its ID. |
-| `agent_await` | Block until background agents complete, using one of the four await modes. |
-
 ### Cleanup
 
-Background agents respect the parent's abort signal — if the parent is aborted, all background children are cancelled. When `autoCancel` is `true` (the default), calling `agent.close()` cancels any still-running background agents.
+Background subagents respect the parent's abort signal. When `autoCancel` is `true`, calling `agent.close()` cancels any still-running background runs.

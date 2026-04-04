@@ -90,7 +90,8 @@ The full set of events emitted by `run()`:
 | `maxTokens` | — | Max output tokens per step |
 | `instructions` | `true` | Whether to load `AGENTS.md` / `CLAUDE.md` from the project directory |
 | `approve` | — | Callback for [tool call approval](/tools/permissions) |
-| `subagents` | — | Child agents available via the `task` tool (see [Subagents](/advanced/subagents)) |
+| `subagents` | — | Child agents or a `SubagentCatalog` available via the `task` tool (see [Subagents](/advanced/subagents)) |
+| `subagentSessions` | — | Optional persistent `Session` layer for resumable subagent memory |
 | `maxSubagentDepth` | `1` | Maximum nesting depth for subagents |
 | `subagentBackground` | — | Enable [background subagent execution](/advanced/subagents#background-subagents) |
 | `mcpServers` | — | [MCP servers](/advanced/mcp-servers) to connect to |
