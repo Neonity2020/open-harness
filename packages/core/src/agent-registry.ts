@@ -79,6 +79,7 @@ export type AgentStatus = "running" | "done" | "failed" | "cancelled";
 
 export interface SettledResult {
   status: "done" | "failed" | "cancelled";
+  sessionId?: string;
   result?: string;
   error?: string;
 }
@@ -87,6 +88,7 @@ interface RegistryEntry {
   promise: Promise<string>;
   controller: AbortController;
   status: AgentStatus;
+  sessionId?: string;
   result?: string;
   error?: string;
   timeoutId?: ReturnType<typeof setTimeout>;
@@ -115,7 +117,7 @@ export class AgentRegistry {
     name: string,
     child: Agent,
     prompt: string,
-    opts: { signal?: AbortSignal; onEvent?: SubagentEventFn },
+    opts: { signal?: AbortSignal; onEvent?: SubagentEventFn; sessionId?: string },
   ): string {
     if (
       this.config.maxConcurrent !== Infinity &&
@@ -138,6 +140,7 @@ export class AgentRegistry {
       promise: undefined!,
       controller,
       status: "running",
+      sessionId: opts.sessionId,
     };
 
     // Auto-timeout
@@ -187,10 +190,17 @@ export class AgentRegistry {
   /**
    * Non-blocking status check.
    */
-  getStatus(id: string): { status: AgentStatus; result?: string; error?: string } | undefined {
+  getStatus(
+    id: string,
+  ): { status: AgentStatus; sessionId?: string; result?: string; error?: string } | undefined {
     const entry = this.agents.get(id);
     if (!entry) return undefined;
-    return { status: entry.status, result: entry.result, error: entry.error };
+    return {
+      status: entry.status,
+      sessionId: entry.sessionId,
+      result: entry.result,
+      error: entry.error,
+    };
   }
 
   /**
@@ -239,10 +249,15 @@ export class AgentRegistry {
         }
         try {
           const result = await entry.promise;
-          results.set(id, { status: "done", result });
+          results.set(id, {
+            status: "done",
+            sessionId: entry.sessionId,
+            result,
+          });
         } catch {
           results.set(id, {
             status: entry.status === "cancelled" ? "cancelled" : "failed",
+            sessionId: entry.sessionId,
             error: entry.error,
           });
         }
@@ -254,13 +269,15 @@ export class AgentRegistry {
   /**
    * Promise.any — first success wins. Rejects only if all fail.
    */
-  async awaitAny(ids: string[]): Promise<{ id: string; result: string }> {
+  async awaitAny(
+    ids: string[],
+  ): Promise<{ id: string; sessionId?: string; result: string }> {
     return Promise.any(
       ids.map(async (id) => {
         const entry = this.agents.get(id);
         if (!entry) throw new Error(`Agent "${id}" not found`);
         const result = await entry.promise;
-        return { id, result };
+        return { id, sessionId: entry.sessionId, result };
       }),
     );
   }
@@ -268,16 +285,22 @@ export class AgentRegistry {
   /**
    * Promise.race — first to settle (success or failure) wins.
    */
-  async awaitRace(ids: string[]): Promise<{ id: string; result?: string; error?: string }> {
+  async awaitRace(
+    ids: string[],
+  ): Promise<{ id: string; sessionId?: string; result?: string; error?: string }> {
     return Promise.race(
       ids.map(async (id) => {
         const entry = this.agents.get(id);
         if (!entry) return { id, error: `Agent "${id}" not found` };
         try {
           const result = await entry.promise;
-          return { id, result };
+          return { id, sessionId: entry.sessionId, result };
         } catch {
-          return { id, error: entry.error ?? "unknown error" };
+          return {
+            id,
+            sessionId: entry.sessionId,
+            error: entry.error ?? "unknown error",
+          };
         }
       }),
     );

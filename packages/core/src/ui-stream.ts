@@ -26,6 +26,7 @@ export function sessionEventsToUIStream(
       // Track subagent start times and names for duration calculation and done/error events
       const subagentStartTimes = new Map<string, number>();
       const subagentNames = new Map<string, string>();
+      const subagentSessionIds = new Map<string, string>();
       const backgroundTaskIds = new Set<string>();
 
       const enqueue = (chunk: OHChunk) => controller.enqueue(chunk);
@@ -129,18 +130,27 @@ export function sessionEventsToUIStream(
                   agent?: string;
                   prompt?: string;
                   background?: boolean;
+                  session?: { id?: string };
                 };
                 if (input.agent) {
                   subagentStartTimes.set(event.toolCallId, Date.now());
                   subagentNames.set(event.toolCallId, input.agent);
+                  if (input.session?.id) {
+                    subagentSessionIds.set(event.toolCallId, input.session.id);
+                  }
                   if (input.background) {
                     backgroundTaskIds.add(event.toolCallId);
                   }
+                  const outputSessionId =
+                    typeof input.session?.id === "string"
+                      ? input.session.id
+                      : undefined;
                   enqueue({
                     type: "data-oh:subagent.start",
                     data: {
                       agentName: input.agent,
                       task: input.prompt ?? "",
+                      ...(outputSessionId ? { sessionId: outputSessionId } : {}),
                       path: [input.agent],
                     },
                   });
@@ -162,13 +172,18 @@ export function sessionEventsToUIStream(
                 const startTime = subagentStartTimes.get(event.toolCallId);
                 const durationMs = startTime ? Date.now() - startTime : 0;
                 const agentName = subagentNames.get(event.toolCallId) ?? "unknown";
+                const sessionId =
+                  extractAttrValue(event.output, "session_id") ??
+                  subagentSessionIds.get(event.toolCallId);
                 subagentStartTimes.delete(event.toolCallId);
                 subagentNames.delete(event.toolCallId);
+                subagentSessionIds.delete(event.toolCallId);
                 enqueue({
                   type: "data-oh:subagent.done",
                   data: {
                     agentName,
                     durationMs,
+                    ...(sessionId ? { sessionId } : {}),
                     path: [agentName],
                   },
                 });
@@ -176,6 +191,7 @@ export function sessionEventsToUIStream(
                 // Clean up tracking for background spawns
                 subagentStartTimes.delete(event.toolCallId);
                 subagentNames.delete(event.toolCallId);
+                subagentSessionIds.delete(event.toolCallId);
                 backgroundTaskIds.delete(event.toolCallId);
               }
               break;
@@ -191,14 +207,17 @@ export function sessionEventsToUIStream(
               // If this is a task tool (subagent), emit subagent error data part
               if (event.toolName === "task") {
                 const agentName = subagentNames.get(event.toolCallId) ?? "unknown";
+                const sessionId = subagentSessionIds.get(event.toolCallId);
                 subagentStartTimes.delete(event.toolCallId);
                 subagentNames.delete(event.toolCallId);
+                subagentSessionIds.delete(event.toolCallId);
                 backgroundTaskIds.delete(event.toolCallId);
                 enqueue({
                   type: "data-oh:subagent.error",
                   data: {
                     agentName,
                     error: event.error,
+                    ...(sessionId ? { sessionId } : {}),
                     path: [agentName],
                   },
                 });
@@ -323,4 +342,10 @@ export function sessionEventsToUIStream(
       controller.close();
     },
   });
+}
+
+function extractAttrValue(output: unknown, attr: string): string | undefined {
+  if (typeof output !== "string") return undefined;
+  const match = output.match(new RegExp(`${attr}="([^"]+)"`));
+  return match?.[1];
 }

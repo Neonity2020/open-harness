@@ -8,6 +8,7 @@ import {
   type LanguageModelUsage,
 } from "ai";
 import { z } from "zod";
+import { Session } from "./session.js";
 import { loadInstructions } from "./instructions.js";
 import {
   connectMCPServers,
@@ -15,7 +16,22 @@ import {
   type MCPServerConfig,
   type MCPConnection,
 } from "./mcp.js";
-import { discoverSkills, type SkillInfo, type SkillsConfig } from "./skills.js";
+import {
+  discoverSkills,
+  type SkillInfo,
+  type SkillsConfig,
+} from "./skills.js";
+import {
+  InMemorySubagentSessionMetadataStore,
+  isSubagentCatalog,
+  type SubagentCatalog,
+  type SubagentDescriptor,
+  type SubagentSessionMetadata,
+  type SubagentSessionMetadataStore,
+  type SubagentSessionMode,
+  type SubagentSessionsConfig,
+  type SubagentSource,
+} from "./subagents.js";
 import { createSkillTool } from "./tools/skill.js";
 import {
   AgentRegistry,
@@ -64,7 +80,9 @@ export interface ToolCallInfo {
  * Called before each tool execution. Return `true` to allow, `false` to deny.
  * Can be async — e.g. to prompt a user in a custom UI.
  */
-export type ApproveFn = (toolCall: ToolCallInfo) => boolean | Promise<boolean>;
+export type ApproveFn = (
+  toolCall: ToolCallInfo,
+) => boolean | Promise<boolean>;
 
 /**
  * Called for every event emitted by a subagent during a task tool call.
@@ -73,7 +91,27 @@ export type ApproveFn = (toolCall: ToolCallInfo) => boolean | Promise<boolean>;
  * `["explore"]` for a direct subagent, or `["explore", "search"]` when
  * a subagent spawns its own subagent.
  */
-export type SubagentEventFn = (path: string[], event: AgentEvent) => void;
+export type SubagentEventFn = (
+  path: string[],
+  event: AgentEvent,
+) => void;
+
+type TaskSessionInput = {
+  mode: SubagentSessionMode;
+  id?: string;
+};
+
+interface SubagentSessionRuntime {
+  activeSessionIds: Set<string>;
+  metadataStore: SubagentSessionMetadataStore;
+}
+
+const SUBAGENT_SESSION_RUNTIME = new WeakMap<
+  SubagentSessionsConfig,
+  SubagentSessionRuntime
+>();
+
+const TASK_SESSION_MODES = ["stateless", "new", "resume", "fork"] as const;
 
 // ── Agent ────────────────────────────────────────────────────────────
 
@@ -90,13 +128,16 @@ export class Agent {
   readonly approve?: ApproveFn;
   readonly onSubagentEvent?: SubagentEventFn;
 
-  /** Original subagent templates (stored so nested children can inherit them). */
-  readonly subagents?: Agent[];
+  /** Original subagent templates or catalog (stored for nested children). */
+  readonly subagents?: SubagentSource;
+
+  /** Optional resumable subagent session config. */
+  readonly subagentSessions?: SubagentSessionsConfig;
 
   /** Background config (stored so nested children can inherit it). */
   readonly subagentBackground?: SubagentBackground;
 
-  /** Registry for background subagents. Only present when `subagentBackground` is configured. */
+  /** Registry for background subagents. Only present when configured. */
   private agentRegistry?: AgentRegistry;
 
   /** Static tools provided at construction time. */
@@ -108,9 +149,9 @@ export class Agent {
 
   /** Skills config — discovered lazily on first run. */
   private skillsConfig?: SkillsConfig;
-  private cachedSkills: SkillInfo[] | null = null; // null = not loaded yet
+  private cachedSkills: SkillInfo[] | null = null;
 
-  private cachedInstructions: string | undefined | null = null; // null = not loaded yet
+  private cachedInstructions: string | undefined | null = null;
 
   constructor(options: {
     name: string;
@@ -129,8 +170,10 @@ export class Agent {
      * When omitted, all tool calls are allowed.
      */
     approve?: ApproveFn;
-    /** Agents available as subagents via the auto-generated `task` tool. */
-    subagents?: Agent[];
+    /** Agents or a catalog available as subagents via the auto-generated `task` tool. */
+    subagents?: SubagentSource;
+    /** Optional stateful session layer for the auto-generated `task` tool. */
+    subagentSessions?: SubagentSessionsConfig;
     /**
      * Maximum nesting depth for subagents. Defaults to `1` (direct subagents
      * only, no nesting). Set to `2` to allow sub-subagents, etc.
@@ -173,38 +216,21 @@ export class Agent {
     this.approve = options.approve;
     this.onSubagentEvent = options.onSubagentEvent;
     this.subagents = options.subagents;
+    this.subagentSessions = options.subagentSessions;
     this.subagentBackground = options.subagentBackground;
     this.mcpServerConfigs = options.mcpServers;
     this.skillsConfig = options.skills;
+    this.tools = options.tools;
 
-    // Merge the task tool into the toolset when subagents are provided and depth > 0
-    if (options.subagents?.length && this.maxSubagentDepth > 0) {
-      const bgConfig = options.subagentBackground
-        ? normalizeBackgroundConfig(options.subagentBackground)
-        : undefined;
-      const registry = bgConfig ? new AgentRegistry(bgConfig) : undefined;
-      this.agentRegistry = registry;
+    if (options.subagentSessions) {
+      getSubagentSessionRuntime(options.subagentSessions);
+    }
 
-      this.tools = {
-        ...(options.tools ?? {}),
-        task: createTaskTool(
-          options.subagents,
-          this.maxSubagentDepth,
-          this.onSubagentEvent,
-          registry,
-        ),
-        ...(registry && bgConfig!.tools.status
-          ? { agent_status: createStatusTool(registry) }
-          : {}),
-        ...(registry && bgConfig!.tools.cancel
-          ? { agent_cancel: createCancelTool(registry) }
-          : {}),
-        ...(registry && bgConfig!.tools.await
-          ? { agent_await: createAwaitTool(registry, bgConfig!.tools.await as AwaitMode[]) }
-          : {}),
-      };
-    } else {
-      this.tools = options.tools;
+    if (options.subagents && this.maxSubagentDepth > 0 && options.subagentBackground) {
+      const bgConfig = normalizeBackgroundConfig(options.subagentBackground);
+      if (bgConfig) {
+        this.agentRegistry = new AgentRegistry(bgConfig);
+      }
     }
   }
 
@@ -226,7 +252,6 @@ export class Agent {
     input: string | ModelMessage[],
     options?: { signal?: AbortSignal },
   ): AsyncGenerator<AgentEvent> {
-    // Build messages: history + new input (Agent does NOT mutate history)
     const messages: ModelMessage[] = [...history];
     if (typeof input === "string") {
       messages.push({ role: "user", content: input });
@@ -234,17 +259,14 @@ export class Agent {
       messages.push(...input);
     }
 
-    // Load AGENTS.md once per agent lifetime
     if (this.instructions && this.cachedInstructions === null) {
       this.cachedInstructions = await loadInstructions();
     }
 
-    // Connect MCP servers once per agent lifetime
     if (this.mcpServerConfigs && !this.mcpConnection) {
       this.mcpConnection = await connectMCPServers(this.mcpServerConfigs);
     }
 
-    // Discover skills once per agent lifetime
     if (this.skillsConfig && this.cachedSkills === null) {
       this.cachedSkills = await discoverSkills(this.skillsConfig);
     }
@@ -252,11 +274,22 @@ export class Agent {
     const systemParts = [this.systemPrompt, this.cachedInstructions].filter(Boolean);
     const system = systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
 
-    // Merge static tools with MCP tools and skill tool
+    const subagentTools = await createSubagentTools(
+      this.subagents,
+      this.maxSubagentDepth,
+      this.onSubagentEvent,
+      this.agentRegistry,
+      this.subagentBackground,
+      this.subagentSessions,
+    );
+
     const allTools: ToolSet = {
-      ...(this.cachedSkills?.length ? { skill: createSkillTool(this.cachedSkills) } : {}),
+      ...(this.cachedSkills?.length
+        ? { skill: createSkillTool(this.cachedSkills) }
+        : {}),
       ...(this.mcpConnection?.tools ?? {}),
       ...(this.tools ?? {}),
+      ...(subagentTools ?? {}),
     };
 
     const tools =
@@ -360,7 +393,10 @@ export class Agent {
           case "error":
             yield {
               type: "error",
-              error: part.error instanceof Error ? part.error : new Error(String(part.error)),
+              error:
+                part.error instanceof Error
+                  ? part.error
+                  : new Error(String(part.error)),
             };
             break;
 
@@ -422,13 +458,59 @@ export class Agent {
         type: "done",
         result: "error",
         messages,
-        totalUsage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
+        totalUsage: {
+          inputTokens: undefined,
+          outputTokens: undefined,
+          totalTokens: undefined,
+        },
       };
     }
   }
 }
 
 // ── Subagent tools ──────────────────────────────────────────────────
+
+async function createSubagentTools(
+  subagents: SubagentSource | undefined,
+  remainingDepth: number,
+  onSubagentEvent?: SubagentEventFn,
+  registry?: AgentRegistry,
+  backgroundConfig?: SubagentBackground,
+  sessionConfig?: SubagentSessionsConfig,
+): Promise<ToolSet | undefined> {
+  if (!subagents || remainingDepth <= 0) return undefined;
+  if (Array.isArray(subagents) && subagents.length === 0) return undefined;
+
+  const bgConfig =
+    registry && backgroundConfig
+      ? normalizeBackgroundConfig(backgroundConfig)
+      : undefined;
+  const task = await createTaskTool(
+    subagents,
+    remainingDepth,
+    onSubagentEvent,
+    registry,
+    sessionConfig,
+  );
+
+  return {
+    task,
+    ...(registry && bgConfig?.tools.status
+      ? { agent_status: createStatusTool(registry) }
+      : {}),
+    ...(registry && bgConfig?.tools.cancel
+      ? { agent_cancel: createCancelTool(registry) }
+      : {}),
+    ...(registry && bgConfig?.tools.await
+      ? {
+          agent_await: createAwaitTool(
+            registry,
+            bgConfig.tools.await as AwaitMode[],
+          ),
+        }
+      : {}),
+  };
+}
 
 function createChildFromTemplate(
   template: Agent,
@@ -450,11 +532,10 @@ function createChildFromTemplate(
     temperature: template.temperature,
     maxTokens: template.maxTokens,
     instructions: template.instructions,
-    // No approve — subagents run autonomously
-    // Pass subagents + background config through when there is remaining depth
-    ...(nextDepth > 0 && template.subagents?.length
+    ...(nextDepth > 0 && template.subagents
       ? {
           subagents: template.subagents,
+          subagentSessions: template.subagentSessions,
           maxSubagentDepth: nextDepth,
           onSubagentEvent: childOnSubagentEvent,
           subagentBackground: template.subagentBackground,
@@ -463,16 +544,18 @@ function createChildFromTemplate(
   });
 }
 
-function createTaskTool(
-  subagents: Agent[],
+async function createTaskTool(
+  subagents: SubagentSource,
   remainingDepth: number,
   onSubagentEvent?: SubagentEventFn,
   registry?: AgentRegistry,
+  sessionConfig?: SubagentSessionsConfig,
 ) {
-  const names = subagents.map((a) => a.name);
-  const byName = new Map(subagents.map((a) => [a.name, a]));
-
-  const listing = subagents.map((a) => `- ${a.name}: ${a.description ?? a.name}`).join("\n");
+  const descriptors = await listSubagentDescriptors(subagents);
+  const names = descriptors.map((subagent) => subagent.name);
+  const listing = descriptors
+    .map((subagent) => `- ${subagent.name}: ${subagent.description ?? subagent.name}`)
+    .join("\n");
 
   const descriptionLines = [
     "Spawn a subagent to handle a task autonomously.",
@@ -480,93 +563,151 @@ function createTaskTool(
     "Launch multiple agents concurrently when possible by calling this tool multiple times in one response.",
   ];
 
-  if (registry) {
+  if (sessionConfig) {
     descriptionLines.push(
       "",
-      "Set background=true to spawn the agent in the background and return immediately with an agent ID.",
-      "Use agent_status, agent_await, or agent_cancel to manage background agents.",
+      "Set session.mode=new to create a resumable subagent session.",
+      "Set session.mode=resume with session.id to continue an earlier subagent session.",
+      "Set session.mode=fork with session.id to clone an earlier session into a new one.",
+      'When session is omitted, the default mode is "' +
+        (sessionConfig.defaultMode ?? "stateless") +
+        '".',
     );
   }
 
-  descriptionLines.push("", "Available agents:", listing);
+  if (registry) {
+    descriptionLines.push(
+      "",
+      "Set background=true to spawn the agent in the background and return immediately with a run ID.",
+      "Use agent_status, agent_await, or agent_cancel to manage background runs.",
+    );
+  }
+
+  if (listing) {
+    descriptionLines.push("", "Available agents:", listing);
+  } else if (isSubagentCatalog(subagents)) {
+    descriptionLines.push("", "Available agents are resolved dynamically at runtime.");
+  }
 
   const baseSchema = z.object({
-    agent: z.enum(names as [string, ...string[]]).describe("Which agent to use"),
+    agent: createAgentSelectionSchema(names).describe("Which agent to use"),
     prompt: z.string().describe("Detailed task description for the subagent"),
   });
 
-  const bgSchema = baseSchema.extend({
-    background: z
-      .boolean()
-      .optional()
-      .describe("If true, spawn in background and return immediately with an agent ID"),
-  });
+  const withSession = sessionConfig
+    ? baseSchema.extend({
+        session: createTaskSessionSchema()
+          .optional()
+          .describe("Optional resumable session instructions"),
+      })
+    : baseSchema;
 
-  const inputSchema = registry ? bgSchema : baseSchema;
+  const inputSchema = registry
+    ? withSession.extend({
+        background: z
+          .boolean()
+          .optional()
+          .describe("If true, spawn in background and return immediately with a run ID"),
+      })
+    : withSession;
 
   return tool({
     description: descriptionLines.join("\n"),
     inputSchema,
     execute: async (
-      rawInput: z.infer<typeof bgSchema>,
+      rawInput: z.infer<typeof inputSchema>,
       { abortSignal }: { abortSignal?: AbortSignal },
     ) => {
-      const { agent: agentName, prompt, background } = rawInput;
-      const template = byName.get(agentName)!;
-      const child = createChildFromTemplate(template, remainingDepth, onSubagentEvent);
+      const { agent: agentName, prompt } = rawInput;
+      const background = "background" in rawInput ? rawInput.background : undefined;
+      const session =
+        "session" in rawInput ? (rawInput.session as TaskSessionInput | undefined) : undefined;
+      const template = await resolveSubagent(subagents, agentName);
+      if (!template) {
+        const suffix = names.length > 0 ? ` Available agents: ${names.join(", ")}.` : "";
+        throw new Error(`Unknown subagent "${agentName}".${suffix}`);
+      }
 
-      // Background mode: spawn and return immediately
+      const prepared = sessionConfig
+        ? await prepareSubagentChild({
+            agentName,
+            template,
+            remainingDepth,
+            onSubagentEvent,
+            sessionConfig,
+            session,
+          })
+        : {
+            child: createChildFromTemplate(
+              template,
+              remainingDepth,
+              onSubagentEvent,
+            ),
+            sessionId: undefined,
+          };
+
+      const { child, sessionId } = prepared;
+
       if (background && registry) {
         const id = registry.spawn(agentName, child, prompt, {
           signal: abortSignal,
           onEvent: onSubagentEvent,
+          sessionId,
         });
-        return `<background_spawn agent_id="${id}">\nAgent "${agentName}" spawned in background with id "${id}".\nUse agent_status, agent_await, or agent_cancel to manage it.\n</background_spawn>`;
+        return formatBackgroundSpawn(agentName, id, sessionId);
       }
 
-      // Foreground mode: run to completion
       let lastText = "";
-      for await (const event of child.run([], prompt, { signal: abortSignal })) {
-        onSubagentEvent?.([agentName], event);
-        if (event.type === "text.done") {
-          lastText = event.text;
+      try {
+        for await (const event of child.run([], prompt, { signal: abortSignal })) {
+          onSubagentEvent?.([agentName], event);
+          if (event.type === "text.done") {
+            lastText = event.text;
+          }
         }
+      } finally {
+        await child.close();
       }
-      await child.close();
 
-      return `<task_result>\n${lastText || "(no output)"}\n</task_result>`;
+      return formatTaskResult(lastText || "(no output)", sessionId);
     },
   });
 }
 
 function createStatusTool(registry: AgentRegistry) {
   return tool({
-    description: "Check the status of a background agent without blocking.",
+    description: "Check the status of a background run without blocking.",
     inputSchema: z.object({
-      id: z.string().describe("The agent ID returned by a background task spawn"),
+      id: z.string().describe("The run ID returned by a background task spawn"),
     }),
     execute: async ({ id }: { id: string }) => {
       const status = registry.getStatus(id);
       if (!status) return `Agent "${id}" not found.`;
       if (status.status === "done") {
-        return `<agent_status id="${id}" status="done">\n${status.result}\n</agent_status>`;
+        return formatAgentStatus(id, status.status, status.result, undefined, status.sessionId);
       }
       if (status.status === "failed") {
-        return `<agent_status id="${id}" status="failed" error="${status.error ?? "unknown"}" />`;
+        return formatAgentStatus(
+          id,
+          status.status,
+          undefined,
+          status.error ?? "unknown",
+          status.sessionId,
+        );
       }
       if (status.status === "cancelled") {
-        return `<agent_status id="${id}" status="cancelled" />`;
+        return formatAgentStatus(id, status.status, undefined, undefined, status.sessionId);
       }
-      return `<agent_status id="${id}" status="running" />`;
+      return formatAgentStatus(id, status.status, undefined, undefined, status.sessionId);
     },
   });
 }
 
 function createCancelTool(registry: AgentRegistry) {
   return tool({
-    description: "Cancel a running background agent.",
+    description: "Cancel a running background run.",
     inputSchema: z.object({
-      id: z.string().describe("The agent ID to cancel"),
+      id: z.string().describe("The run ID to cancel"),
     }),
     execute: async ({ id }: { id: string }) => {
       const cancelled = registry.cancel(id);
@@ -588,45 +729,47 @@ function createAwaitTool(registry: AgentRegistry, modes: AwaitMode[]) {
 
   return tool({
     description: [
-      "Wait for one or more background agents to complete.",
+      "Wait for one or more background runs to complete.",
       "",
       "Modes:",
-      ...modes.map((m) => `- ${modeDescriptions[m]}`),
+      ...modes.map((mode) => `- ${modeDescriptions[mode]}`),
     ].join("\n"),
     inputSchema: z.object({
-      ids: z.array(z.string()).min(1).describe("Agent IDs to wait for"),
-      mode: z.enum(modes as [AwaitMode, ...AwaitMode[]]).describe("How to wait for agents"),
+      ids: z.array(z.string()).min(1).describe("Run IDs to wait for"),
+      mode: z.enum(modes as [AwaitMode, ...AwaitMode[]]).describe("How to wait for runs"),
     }),
     execute: async ({ ids, mode }: { ids: string[]; mode: AwaitMode }) => {
       switch (mode) {
         case "all": {
           try {
             const results = await registry.awaitAll(ids);
-            const entries = [...results.entries()].map(
-              ([id, result]) => `<agent id="${id}">\n${result}\n</agent>`,
-            );
+            const entries = [...results.entries()].map(([id, result]) => {
+              const sessionId = registry.getStatus(id)?.sessionId;
+              return `<agent id="${id}"${formatOptionalAttr("session_id", sessionId)}>\n${result}\n</agent>`;
+            });
             return `<await_result mode="all">\n${entries.join("\n")}\n</await_result>`;
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            return `<await_result mode="all" error="${msg}" />`;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return `<await_result mode="all" error="${message}" />`;
           }
         }
 
         case "allSettled": {
           const results = await registry.awaitAllSettled(ids);
-          const entries = [...results.entries()].map(([id, r]) => {
-            if (r.status === "done") {
-              return `<agent id="${id}" status="done">\n${r.result}\n</agent>`;
+          const entries = [...results.entries()].map(([id, result]) => {
+            const sessionAttr = formatOptionalAttr("session_id", result.sessionId);
+            if (result.status === "done") {
+              return `<agent id="${id}" status="done"${sessionAttr}>\n${result.result}\n</agent>`;
             }
-            return `<agent id="${id}" status="${r.status}" error="${r.error ?? "unknown"}" />`;
+            return `<agent id="${id}" status="${result.status}"${sessionAttr} error="${result.error ?? "unknown"}" />`;
           });
           return `<await_result mode="allSettled">\n${entries.join("\n")}\n</await_result>`;
         }
 
         case "any": {
           try {
-            const { id, result } = await registry.awaitAny(ids);
-            return `<await_result mode="any" winner="${id}">\n${result}\n</await_result>`;
+            const { id, sessionId, result } = await registry.awaitAny(ids);
+            return `<await_result mode="any" winner="${id}"${formatOptionalAttr("session_id", sessionId)}>\n${result}\n</await_result>`;
           } catch {
             return `<await_result mode="any" error="All agents failed." />`;
           }
@@ -634,14 +777,302 @@ function createAwaitTool(registry: AgentRegistry, modes: AwaitMode[]) {
 
         case "race": {
           const settled = await registry.awaitRace(ids);
+          const sessionAttr = formatOptionalAttr("session_id", settled.sessionId);
           if (settled.error) {
-            return `<await_result mode="race" settled="${settled.id}" status="failed" error="${settled.error}" />`;
+            return `<await_result mode="race" settled="${settled.id}"${sessionAttr} status="failed" error="${settled.error}" />`;
           }
-          return `<await_result mode="race" settled="${settled.id}">\n${settled.result}\n</await_result>`;
+          return `<await_result mode="race" settled="${settled.id}"${sessionAttr}>\n${settled.result}\n</await_result>`;
         }
       }
     },
   });
+}
+
+async function prepareSubagentChild(params: {
+  agentName: string;
+  template: Agent;
+  remainingDepth: number;
+  onSubagentEvent?: SubagentEventFn;
+  sessionConfig: SubagentSessionsConfig;
+  session?: TaskSessionInput;
+}): Promise<{ child: Agent; sessionId?: string }> {
+  const {
+    agentName,
+    template,
+    remainingDepth,
+    onSubagentEvent,
+    sessionConfig,
+    session,
+  } = params;
+  const child = createChildFromTemplate(template, remainingDepth, onSubagentEvent);
+  const mode = session?.mode ?? sessionConfig.defaultMode ?? "stateless";
+  if (mode === "stateless") {
+    return { child };
+  }
+
+  const runtime = getSubagentSessionRuntime(sessionConfig);
+  const now = new Date().toISOString();
+  let sessionId: string;
+  let initialMessages: ModelMessage[] = [];
+  let metadata: SubagentSessionMetadata;
+
+  try {
+    switch (mode) {
+      case "new":
+        sessionId = crypto.randomUUID();
+        metadata = {
+          sessionId,
+          agentName,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await runtime.metadataStore.save(metadata);
+        break;
+
+      case "resume": {
+        sessionId = requireSessionId(session, mode);
+        metadata = await loadRequiredSessionMetadata(
+          runtime.metadataStore,
+          sessionId,
+          agentName,
+        );
+        const storedMessages = await sessionConfig.messages.load(sessionId);
+        if (!storedMessages) {
+          throw new Error(`Subagent session "${sessionId}" could not be loaded.`);
+        }
+        initialMessages = structuredClone(storedMessages);
+        metadata = { ...metadata, updatedAt: now };
+        break;
+      }
+
+      case "fork": {
+        const sourceId = requireSessionId(session, mode);
+        await loadRequiredSessionMetadata(
+          runtime.metadataStore,
+          sourceId,
+          agentName,
+        );
+        const sourceMessages = await sessionConfig.messages.load(sourceId);
+        if (!sourceMessages) {
+          throw new Error(`Subagent session "${sourceId}" could not be loaded.`);
+        }
+        sessionId = crypto.randomUUID();
+        initialMessages = structuredClone(sourceMessages);
+        metadata = {
+          sessionId,
+          agentName,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await runtime.metadataStore.save(metadata);
+        await sessionConfig.messages.save(sessionId, initialMessages);
+        break;
+      }
+
+      default:
+        return { child };
+    }
+  } catch (error) {
+    await child.close();
+    throw error;
+  }
+
+  if (runtime.activeSessionIds.has(sessionId)) {
+    await child.close();
+    throw new Error(`Subagent session "${sessionId}" is already running.`);
+  }
+
+  runtime.activeSessionIds.add(sessionId);
+  let released = false;
+
+  const close = async () => {
+    if (released) return;
+    released = true;
+    runtime.activeSessionIds.delete(sessionId);
+    await child.close();
+  };
+
+  const statefulChild = {
+    run: async function* (
+      _history: ModelMessage[],
+      input: string | ModelMessage[],
+      options?: { signal?: AbortSignal },
+    ): AsyncGenerator<AgentEvent> {
+      const session = new Session({
+        agent: child,
+        sessionId,
+        sessionStore: sessionConfig.messages,
+        ...(sessionConfig.sessionOptions ?? {}),
+      });
+      session.messages = structuredClone(initialMessages);
+
+      try {
+        for await (const event of session.send(input, options)) {
+          if (
+            event.type === "turn.start" ||
+            event.type === "turn.done" ||
+            event.type === "compaction.start" ||
+            event.type === "compaction.pruned" ||
+            event.type === "compaction.summary" ||
+            event.type === "compaction.done" ||
+            event.type === "retry"
+          ) {
+            continue;
+          }
+          yield event;
+        }
+        await runtime.metadataStore.save({
+          sessionId,
+          agentName,
+          createdAt: metadata.createdAt,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        await runtime.metadataStore.save({
+          sessionId,
+          agentName,
+          createdAt: metadata.createdAt,
+          updatedAt: new Date().toISOString(),
+        });
+        throw error;
+      }
+    },
+    close,
+  } as unknown as Agent;
+
+  return { child: statefulChild, sessionId };
+}
+
+function getSubagentSessionRuntime(
+  config: SubagentSessionsConfig,
+): SubagentSessionRuntime {
+  let runtime = SUBAGENT_SESSION_RUNTIME.get(config);
+  if (!runtime) {
+    runtime = {
+      activeSessionIds: new Set<string>(),
+      metadataStore:
+        config.metadata ?? new InMemorySubagentSessionMetadataStore(),
+    };
+    SUBAGENT_SESSION_RUNTIME.set(config, runtime);
+  }
+  return runtime;
+}
+
+function createAgentSelectionSchema(names: string[]) {
+  if (names.length > 0) {
+    return z.enum(names as [string, ...string[]]);
+  }
+  return z.string().min(1);
+}
+
+function createTaskSessionSchema() {
+  return z
+    .object({
+      mode: z.enum(TASK_SESSION_MODES).describe("How to handle subagent memory"),
+      id: z.string().optional().describe("Existing session ID to resume or fork"),
+    })
+    .superRefine((value, ctx) => {
+      if ((value.mode === "resume" || value.mode === "fork") && !value.id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `session.id is required when session.mode="${value.mode}"`,
+          path: ["id"],
+        });
+      }
+
+      if ((value.mode === "stateless" || value.mode === "new") && value.id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `session.id is not used when session.mode="${value.mode}"`,
+          path: ["id"],
+        });
+      }
+    });
+}
+
+async function listSubagentDescriptors(
+  subagents: SubagentSource,
+): Promise<SubagentDescriptor[]> {
+  if (Array.isArray(subagents)) {
+    return subagents.map((agent) => ({
+      name: agent.name,
+      description: agent.description,
+    }));
+  }
+  return subagents.list();
+}
+
+async function resolveSubagent(
+  subagents: SubagentSource,
+  name: string,
+): Promise<Agent | undefined> {
+  if (Array.isArray(subagents)) {
+    return subagents.find((agent) => agent.name === name);
+  }
+  return subagents.resolve(name);
+}
+
+async function loadRequiredSessionMetadata(
+  store: SubagentSessionMetadataStore,
+  sessionId: string,
+  agentName: string,
+): Promise<SubagentSessionMetadata> {
+  const metadata = await store.load(sessionId);
+  if (!metadata) {
+    throw new Error(`Unknown subagent session "${sessionId}".`);
+  }
+  if (metadata.agentName !== agentName) {
+    throw new Error(
+      `Subagent session "${sessionId}" belongs to "${metadata.agentName}", not "${agentName}".`,
+    );
+  }
+  return metadata;
+}
+
+function requireSessionId(
+  session: TaskSessionInput | undefined,
+  mode: "resume" | "fork",
+): string {
+  if (!session?.id) {
+    throw new Error(`session.id is required when session.mode="${mode}".`);
+  }
+  return session.id;
+}
+
+function formatBackgroundSpawn(
+  agentName: string,
+  runId: string,
+  sessionId?: string,
+) {
+  return `<background_spawn agent_id="${runId}"${formatOptionalAttr("session_id", sessionId)}>\nAgent "${agentName}" spawned in background with id "${runId}".\nUse agent_status, agent_await, or agent_cancel to manage it.\n</background_spawn>`;
+}
+
+function formatTaskResult(result: string, sessionId?: string) {
+  return `<task_result${formatOptionalAttr("session_id", sessionId)}>\n${result}\n</task_result>`;
+}
+
+function formatAgentStatus(
+  runId: string,
+  status: "running" | "done" | "failed" | "cancelled",
+  result?: string,
+  error?: string,
+  sessionId?: string,
+) {
+  const sessionAttr = formatOptionalAttr("session_id", sessionId);
+  if (status === "done") {
+    return `<agent_status id="${runId}" status="done"${sessionAttr}>\n${result}\n</agent_status>`;
+  }
+  if (status === "failed") {
+    return `<agent_status id="${runId}" status="failed"${sessionAttr} error="${error ?? "unknown"}" />`;
+  }
+  if (status === "cancelled") {
+    return `<agent_status id="${runId}" status="cancelled"${sessionAttr} />`;
+  }
+  return `<agent_status id="${runId}" status="running"${sessionAttr} />`;
+}
+
+function formatOptionalAttr(name: string, value: string | undefined) {
+  return value ? ` ${name}="${value}"` : "";
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -683,14 +1114,15 @@ function buildAbortedStepMessages(
 
 function wrapToolsWithApproval(tools: ToolSet, approve: ApproveFn): ToolSet {
   const wrapped: ToolSet = {};
-  for (const [name, t] of Object.entries(tools)) {
-    if (!t.execute) {
-      wrapped[name] = t;
+  for (const [name, toolDef] of Object.entries(tools)) {
+    if (!toolDef.execute) {
+      wrapped[name] = toolDef;
       continue;
     }
-    const originalExecute = t.execute;
+
+    const originalExecute = toolDef.execute;
     wrapped[name] = {
-      ...t,
+      ...toolDef,
       execute: async (input: any, options: any) => {
         const allowed = await approve({
           toolName: name,

@@ -10,6 +10,21 @@ export {
   type SubagentEventFn,
 } from "./agent.js";
 
+// ── Subagent catalogs & resumable sessions ─────────────────────────
+
+export {
+  InMemorySubagentSessionMetadataStore,
+  isSubagentCatalog,
+  type SubagentCatalog,
+  type SubagentDescriptor,
+  type SubagentSource,
+  type SubagentSessionMode,
+  type SubagentSessionDefaultMode,
+  type SubagentSessionMetadata,
+  type SubagentSessionMetadataStore,
+  type SubagentSessionsConfig,
+} from "./subagents.js";
+
 // ── Agent Registry (background subagents) ───────────────────────────
 
 export {
