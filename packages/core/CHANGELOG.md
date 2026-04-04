@@ -1,5 +1,11 @@
 # @openharness/core
 
+## 0.6.0
+
+### Minor Changes
+
+- 7ae7ecd: Add subagent sessions, enabling stateful multi-turn conversations with subagents. The `task` tool now supports session modes (`stateless`, `new`, `resume`, `fork`) and a pluggable `SubagentSessionMetadataStore` for tracking session state. A `SubagentCatalog` interface allows lazy, dynamic resolution of subagent definitions. The React and Vue providers surface the `sessionId` on `SubagentInfo` so UIs can track which session a subagent belongs to.
+
 ## 0.5.3
 
 ### Patch Changes
