@@ -93,6 +93,34 @@ describe("useSubagentStatus", () => {
     expect(result.current.sub.hasActiveSubagents).toBe(false);
   });
 
+  it("retains sessionId metadata across subagent events", () => {
+    const { result } = renderHook(
+      () => ({ sub: useSubagentStatus(), dispatch: useDispatch() }),
+      { wrapper },
+    );
+
+    act(() => {
+      result.current.dispatch({
+        type: "data-oh:subagent.start",
+        data: {
+          agentName: "explore",
+          task: "search",
+          sessionId: "sub-123",
+        },
+      });
+      result.current.dispatch({
+        type: "data-oh:subagent.done",
+        data: {
+          agentName: "explore",
+          durationMs: 25,
+          sessionId: "sub-123",
+        },
+      });
+    });
+
+    expect(result.current.sub.recentSubagents[0].sessionId).toBe("sub-123");
+  });
+
   it("tracks subagent error", () => {
     const { result } = renderHook(
       () => ({ sub: useSubagentStatus(), dispatch: useDispatch() }),
