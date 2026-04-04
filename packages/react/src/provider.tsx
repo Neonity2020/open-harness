@@ -45,6 +45,7 @@ export function OpenHarnessProvider({ children }: OpenHarnessProviderProps) {
             name: path[path.length - 1],
             task: data?.task ?? "",
             status: "running",
+            sessionId: data?.sessionId,
             path,
             startedAt: Date.now(),
           };
@@ -66,6 +67,7 @@ export function OpenHarnessProvider({ children }: OpenHarnessProviderProps) {
             next.set(key, {
               ...existing,
               status: "done",
+              sessionId: data?.sessionId ?? existing.sessionId,
               durationMs: data?.durationMs ?? Date.now() - existing.startedAt,
             });
             return next;
@@ -83,6 +85,7 @@ export function OpenHarnessProvider({ children }: OpenHarnessProviderProps) {
             next.set(key, {
               ...existing,
               status: "error",
+              sessionId: data?.sessionId ?? existing.sessionId,
               error: data?.error ?? "Unknown error",
             });
             return next;
