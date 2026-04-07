@@ -190,6 +190,33 @@ describe("listFiles", () => {
     expect(names).toContain("top.txt");
     expect(names.some((n: string) => n.includes("nested.txt"))).toBe(true);
   });
+
+  it("supports paginated listings", async () => {
+    await writeTestFile("a.txt", "a");
+    await writeTestFile("b.txt", "b");
+    await writeTestFile("c.txt", "c");
+
+    const result = await exec(tools.listFiles, { dirPath: ".", recursive: false, offset: 2, limit: 1 });
+
+    expect(result.count).toBe(1);
+    expect(result.totalCount).toBe(3);
+    expect(result.fromEntry).toBe(2);
+    expect(result.toEntry).toBe(2);
+    expect(result.status).toContain("offset=3");
+  });
+
+  it("truncates listing output at maxOutputBytes", async () => {
+    await writeTestFile("alpha-very-long-name.txt", "a");
+    await writeTestFile("beta-very-long-name.txt", "b");
+    await writeTestFile("gamma-very-long-name.txt", "c");
+
+    const smallTools = createFsTools(provider, { maxOutputBytes: 90 });
+    const result = await exec(smallTools.listFiles, { dirPath: ".", recursive: false });
+
+    expect(result.status).toContain("capped");
+    expect(result.count).toBeLessThan(result.totalCount);
+    expect(result.status).toContain("offset=");
+  });
 });
 
 // ── grep ────────────────────────────────────────────────────────────
@@ -217,6 +244,39 @@ describe("grep", () => {
     const result = await exec(tools.grep, { pattern: "match", dirPath: ".", glob: ".ts" });
     expect(result.matchCount).toBe(1);
     expect(result.matches[0].file).toContain(".ts");
+  });
+
+  it("supports paginated matches", async () => {
+    await writeTestFile("file.txt", "match 1\nmatch 2\nmatch 3");
+
+    const result = await exec(tools.grep, { pattern: "match", dirPath: ".", offset: 2, limit: 1 });
+
+    expect(result.matchCount).toBe(3);
+    expect(result.fromMatch).toBe(2);
+    expect(result.toMatch).toBe(2);
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].line).toBe(2);
+    expect(result.status).toContain("offset=3");
+  });
+
+  it("truncates grep output at maxOutputBytes", async () => {
+    await writeTestFile("file.txt", ["match alpha text", "match beta text", "match gamma text"].join("\n"));
+
+    const smallTools = createFsTools(provider, { maxOutputBytes: 80 });
+    const result = await exec(smallTools.grep, { pattern: "match", dirPath: "." });
+
+    expect(result.status).toContain("capped");
+    expect(result.matches.length).toBeLessThan(result.matchCount);
+    expect(result.status).toContain("offset=");
+  });
+
+  it("truncates long matching lines", async () => {
+    await writeTestFile("file.txt", `match ${"x".repeat(5000)}`);
+
+    const result = await exec(tools.grep, { pattern: "match", dirPath: "." });
+
+    expect(result.matches[0].content).toContain("line truncated");
+    expect(result.matches[0].content.length).toBeLessThan(5000);
   });
 });
 
