@@ -9,6 +9,8 @@ Build capable, general-purpose AI agents in code. Based on [Vercel's AI SDK](htt
 | Package | Description |
 | --- | --- |
 | [`@openharness/core`](packages/core) | Agent, Session, Conversation, middleware, tools, UI stream integration |
+| [`@openharness/provider-chatgpt`](packages/provider-chatgpt) | Experimental ChatGPT/Codex OAuth model provider for ChatGPT subscription-backed local harnesses |
+| [`@openharness/provider-vfs`](packages/provider-vfs) | Virtual filesystem provider for sandboxed, in-memory, or SQLite-backed file access |
 | [`@openharness/react`](packages/react) | React hooks and provider for AI SDK 5 chat UIs |
 | [`@openharness/vue`](packages/vue) | Vue 3 composables and provider for AI SDK 5 chat UIs |
 
@@ -82,11 +84,13 @@ Built-in subagents stay stateless by default, but you can now opt into:
 
 | Example | Run |
 | --- | --- |
-| [CLI agent](examples/cli) — terminal agent with tool approval and subagents | `pnpm --filter cli-demo start` |
+| [CLI agent](examples/cli) — terminal agent with tool approval and subagents | `pnpm --filter cli-demo start` or `pnpm --filter cli-demo start -- --chatgpt` |
 | [Next.js chat](examples/nextjs-demo) — streaming chat with `@openharness/react` | `pnpm --filter nextjs-demo dev` |
 | [Nuxt chat](examples/nuxt-demo) — streaming chat with `@openharness/vue` | `pnpm --filter nuxt-demo dev` |
 
-All examples require an `OPENAI_API_KEY`. To run them:
+By default the examples use `OPENAI_API_KEY`. The CLI agent can instead use ChatGPT/Codex OAuth with `--chatgpt`.
+
+To run them:
 
 ```bash
 git clone https://github.com/MaxGfeller/open-harness.git

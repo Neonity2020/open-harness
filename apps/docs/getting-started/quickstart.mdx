@@ -117,6 +117,12 @@ Then pick an example:
     ```bash
     pnpm --filter cli-demo start
     ```
+
+    To use ChatGPT/Codex OAuth instead of `OPENAI_API_KEY`:
+
+    ```bash
+    pnpm --filter cli-demo start -- --chatgpt
+    ```
   </Tab>
   <Tab title="Next.js">
     A chat app with streaming, tool visualization, and subagent status:
@@ -141,10 +147,11 @@ Then pick an example:
 </Tabs>
 
 <Note>
-  All examples require an `OPENAI_API_KEY`. Create a `.env` file in the repo root:
+  By default the examples use `OPENAI_API_KEY`. Create a `.env` file in the repo root:
   ```bash
   echo "OPENAI_API_KEY=sk-..." > .env
   ```
+  The CLI example can instead use ChatGPT/Codex device login with `--chatgpt`.
 </Note>
 
 ## Next Steps

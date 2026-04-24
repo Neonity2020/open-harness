@@ -5,9 +5,10 @@ OpenHarness uses [Changesets](https://github.com/changesets/changesets) for pack
 ## Published Packages
 
 - `@openharness/core`
+- `@openharness/provider-chatgpt`
+- `@openharness/provider-vfs`
 - `@openharness/react`
 - `@openharness/vue`
-- `@openharness/provider-vfs`
 
 Apps and examples stay private and are ignored by Changesets.
 

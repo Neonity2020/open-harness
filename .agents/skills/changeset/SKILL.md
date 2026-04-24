@@ -9,7 +9,7 @@ Create or update a `.changeset/*.md` file for the current branch.
 
 Repo-specific rules:
 
-- Only publishable packages belong in a changeset: `@openharness/core`, `@openharness/react`, `@openharness/vue`, `@openharness/provider-vfs`.
+- Only publishable packages belong in a changeset: `@openharness/core`, `@openharness/provider-chatgpt`, `@openharness/provider-vfs`, `@openharness/react`, `@openharness/vue`.
 - Ignore `apps/*` and `examples/*` unless they reveal a user-facing package behavior change that should still be described under one of the public packages.
 - If the branch only changes docs, examples, or website content, say that no changeset is needed instead of inventing one.
 - Prefer the smallest valid bump. Use `major` only for real breaking API or behavior changes.

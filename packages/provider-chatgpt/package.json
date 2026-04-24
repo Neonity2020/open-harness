@@ -1,0 +1,43 @@
+{
+  "name": "@openharness/provider-chatgpt",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ChatGPT/Codex OAuth provider for OpenHarness models using the Vercel AI SDK",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "agent",
+    "ai",
+    "chatgpt",
+    "codex",
+    "oauth",
+    "openharness"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.30"
+  },
+  "peerDependencies": {
+    "zod": "^3.25.76 || ^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  }
+}

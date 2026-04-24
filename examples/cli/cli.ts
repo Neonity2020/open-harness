@@ -1,5 +1,10 @@
 import * as readline from "node:readline";
 import { openai } from "@ai-sdk/openai";
+import {
+  FileTokenStore,
+  createChatGPTAuth,
+  createChatGPTProvider,
+} from "@openharness/provider-chatgpt";
 import chalk from "chalk";
 import ora from "ora";
 import {
@@ -21,6 +26,57 @@ const shellProvider = new NodeShellProvider();
 const fsTools = createFsTools(fsProvider);
 const { readFile, listFiles, grep } = fsTools;
 const { bash } = createBashTool(shellProvider);
+
+// ── CLI options ─────────────────────────────────────────────────────
+
+interface CliOptions {
+  chatgpt: boolean;
+  model?: string;
+}
+
+function parseArgs(args: string[]): CliOptions {
+  const options: CliOptions = {
+    chatgpt: false,
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === "--chatgpt") {
+      options.chatgpt = true;
+      continue;
+    }
+
+    if (arg === "--model") {
+      options.model = args[++i];
+      continue;
+    }
+
+    if (arg?.startsWith("--model=")) {
+      options.model = arg.slice("--model=".length);
+      continue;
+    }
+
+    if (arg === "--help" || arg === "-h") {
+      printHelp();
+      process.exit(0);
+    }
+  }
+
+  return options;
+}
+
+function printHelp() {
+  console.log(`
+Usage:
+  pnpm --filter cli-demo start
+  pnpm --filter cli-demo start -- --chatgpt
+
+Options:
+  --chatgpt     Use ChatGPT/Codex device login instead of OPENAI_API_KEY
+  --model <id>  Override the model id
+`);
+}
 
 // ── Readline setup ───────────────────────────────────────────────────
 
@@ -145,52 +201,100 @@ function onSubagentEvent(path: string[], event: AgentEvent) {
   }
 }
 
+// ── Model selection ──────────────────────────────────────────────────
+
+async function createModel(options: CliOptions) {
+  const modelId = options.model ?? (options.chatgpt ? "gpt-5.5" : "gpt-5.2");
+
+  if (!options.chatgpt) {
+    return {
+      model: openai(modelId as Parameters<typeof openai>[0]),
+      modelId,
+      providerLabel: "OpenAI API",
+    };
+  }
+
+  const auth = createChatGPTAuth({
+    tokenStore: new FileTokenStore(),
+  });
+
+  try {
+    await auth.getFreshToken();
+  } catch {
+    const flow = await auth.startDeviceFlow();
+    console.log();
+    console.log(`  ${chalk.bold("ChatGPT login")}`);
+    console.log(`  Open: ${chalk.cyan(flow.verificationUrl)}`);
+    console.log(`  Code: ${chalk.bold(flow.userCode)}`);
+    await flow.pollUntilComplete({
+      onPoll: () => process.stdout.write(chalk.dim(".")),
+    });
+    process.stdout.write("\n");
+  }
+
+  const chatgpt = createChatGPTProvider({ auth });
+  return {
+    model: chatgpt(modelId as Parameters<typeof chatgpt>[0]),
+    modelId,
+    providerLabel: "ChatGPT",
+  };
+}
+
 // ── Agents ───────────────────────────────────────────────────────────
 
-const explore = new Agent({
-  name: "explore",
-  description:
-    "Read-only codebase exploration. Use for searching, reading files, and understanding code.",
-  systemPrompt:
-    "You are a codebase exploration agent. You have read-only access to the filesystem. " +
-    "Use your tools to thoroughly explore the codebase and answer questions. " +
-    "Be concise but thorough in your findings.",
-  model: openai("gpt-5.2"),
-  tools: { readFile, listFiles, grep, bash },
-  maxSteps: 30,
-});
+function createChat(model: Awaited<ReturnType<typeof createModel>>["model"]) {
+  const explore = new Agent({
+    name: "explore",
+    description:
+      "Read-only codebase exploration. Use for searching, reading files, and understanding code.",
+    systemPrompt:
+      "You are a codebase exploration agent. You have read-only access to the filesystem. " +
+      "Use your tools to thoroughly explore the codebase and answer questions. " +
+      "Be concise but thorough in your findings.",
+    model,
+    tools: { readFile, listFiles, grep, bash },
+    maxSteps: 30,
+  });
 
-const agent = new Agent({
-  name: "cli-agent",
-  systemPrompt:
-    "You are an expert agent built with open-harness. You are invoked through a CLI tool and have access to a set of tools to help you complete tasks. " +
-    "You help the user analyze, understand, make changes to, and implement features in their project. " +
-    "For read-only exploration tasks (searching, reading, understanding code), prefer using the explore subagent via the task tool.",
-  model: openai("gpt-5.2"),
-  tools: { ...fsTools, bash },
-  maxSteps: 20,
-  approve,
-  subagents: [explore],
-  onSubagentEvent,
-});
+  const agent = new Agent({
+    name: "cli-agent",
+    systemPrompt:
+      "You are an expert agent built with open-harness. You are invoked through a CLI tool and have access to a set of tools to help you complete tasks. " +
+      "You help the user analyze, understand, make changes to, and implement features in their project. " +
+      "For read-only exploration tasks (searching, reading, understanding code), prefer using the explore subagent via the task tool.",
+    model,
+    tools: { ...fsTools, bash },
+    maxSteps: 20,
+    approve,
+    subagents: [explore],
+    onSubagentEvent,
+  });
 
-// ── Compose middleware ───────────────────────────────────────────────
+  const runner = apply(
+    toRunner(agent),
+    withTurnTracking(),
+    withCompaction({ contextWindow: 200_000, model: agent.model }),
+    withRetry(),
+  );
 
-const runner = apply(
-  toRunner(agent),
-  withTurnTracking(),
-  withCompaction({ contextWindow: 200_000, model: agent.model }),
-  withRetry(),
-);
-
-const chat = new Conversation({ runner });
+  return {
+    agent,
+    chat: new Conversation({ runner }),
+  };
+}
 
 // ── Main loop ────────────────────────────────────────────────────────
 
 async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  const selected = await createModel(options);
+  const { agent, chat } = createChat(selected.model);
+
   console.log();
   console.log(
-    `  ${chalk.bold.cyan("open-harness")} ${chalk.dim("gpt-5.2 · fs tools · explore subagent")}`,
+    `  ${chalk.bold.cyan("open-harness")} ${chalk.dim(
+      `${selected.providerLabel} ${selected.modelId} · fs tools · explore subagent`,
+    )}`,
   );
   console.log(`  ${chalk.dim('Type "exit" to quit.')}`);
 

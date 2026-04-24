@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.30",
-    "@openharness/core": "workspace:*"
+    "@openharness/core": "workspace:*",
+    "@openharness/provider-chatgpt": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.3.0",

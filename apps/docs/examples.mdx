@@ -13,10 +13,17 @@ An interactive terminal agent with tool approval prompts, subagent display, and 
 pnpm --filter cli-demo start
 ```
 
+To use ChatGPT/Codex OAuth instead of `OPENAI_API_KEY`:
+
+```bash
+pnpm --filter cli-demo start -- --chatgpt
+```
+
 **Features:**
 - Tool approval prompts with queued display
 - Subagent status with spinners
 - Message compaction
+- Optional ChatGPT/Codex OAuth provider via `--chatgpt`
 - Composed middleware stack
 
 **Source:** [`examples/cli`](https://github.com/MaxGfeller/open-harness/tree/main/examples/cli)
@@ -61,11 +68,13 @@ Then open [http://localhost:3000](http://localhost:3000).
 
 ## Prerequisites
 
-All examples require an `OPENAI_API_KEY`. Create a `.env` file in the repo root:
+By default the examples use `OPENAI_API_KEY`. Create a `.env` file in the repo root:
 
 ```bash
 echo "OPENAI_API_KEY=sk-..." > .env
 ```
+
+The CLI example can instead use ChatGPT/Codex device login with `--chatgpt`.
 
 Clone and build the repository first:
 
